@@ -92,13 +92,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun sync(announce: Boolean = true) =
     run("Syncing…", onSuccess = { if (announce) notice = "Synced" }) { passage.repo.sync() }
 
-  fun save(name: String, content: String, isNew: Boolean) {
+  /** Saves an entry; [oldName] is null for a new entry, and differs from [name] when renaming. */
+  fun save(oldName: String?, name: String, content: String) {
     var warnings = emptyList<String>()
     run("Saving…", onSuccess = {
       screen = Screen.Entries
       notice = (listOf("Saved $name") + warnings).joinToString("\n")
       sync(announce = false)
-    }) { warnings = passage.save(name, content, isNew) }
+    }) { warnings = passage.save(oldName, name, content) }
   }
 
   fun delete(name: String) = run("Deleting…", onSuccess = {

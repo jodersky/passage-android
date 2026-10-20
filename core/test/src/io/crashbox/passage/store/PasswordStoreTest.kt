@@ -92,6 +92,33 @@ class PasswordStoreTest {
   }
 
   @Test
+  fun moveReencryptsForTheNewLocation() {
+    write(".age-recipients", "$x25519Recipient\n$phoneRecipient\n")
+    write("phone-only/.age-recipients", "$phoneRecipient\n")
+    store.encrypt("web/site", "pw\n".toByteArray())
+
+    store.move("web/site", "phone-only/site", "pw\n".toByteArray())
+    assertEquals(listOf("phone-only/site"), store.entries())
+    assertFalse(File(root, "web").exists())
+    assertEquals("pw\n", store.decrypt("phone-only/site", listOf(P256TagRecipientStanzaReader(phone))).decodeToString())
+    // no longer readable by the desktop key, which is not a recipient there
+    assertFailsWith<Exception> {
+      store.decrypt("phone-only/site", listOf(X25519RecipientStanzaReaderFactory.newRecipientStanzaReader(x25519Identity)))
+    }
+  }
+
+  @Test
+  fun moveKeepsTheEntryWhenItCannotBeEncrypted() {
+    write(".age-recipients", "$x25519Recipient\n")
+    write("plugin/.age-recipients", "age1yubikey1qwt50d05nh5vutpdzmlg5wn80xq5negm4uj9ghv0snvdd3yysf5yw3rhl3t\n")
+    store.encrypt("a", "pw\n".toByteArray())
+    store.encrypt("b", "pw\n".toByteArray())
+    assertFailsWith<UnsupportedRecipientException> { store.move("a", "plugin/a", "pw\n".toByteArray()) }
+    assertFailsWith<FileAlreadyExistsException> { store.move("a", "b", "pw\n".toByteArray()) }
+    assertEquals(listOf("a", "b"), store.entries())
+  }
+
+  @Test
   fun entryContent() {
     assertEquals("pw\n", EntryContent.of("pw", "  \n"))
     assertEquals("pw\nuser: me\nurl: x\n", EntryContent.of("pw", "user: me\nurl: x\n\n"))

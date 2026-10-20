@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -172,6 +173,7 @@ private fun Page(
   ) { padding -> content(Modifier.padding(padding)) }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   var query by rememberSaveable { mutableStateOf("") }
@@ -205,19 +207,39 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
       )
       LazyColumn {
-        items(shown, key = { it }) { name ->
-          val dir = name.substringBeforeLast('/', "")
-          ListItem(
-            headlineContent = { Text(name.substringAfterLast('/')) },
-            supportingContent = if (dir.isEmpty()) null else ({ Text(dir) }),
-            modifier = Modifier.clickable { vm.screen = Screen.Entry(name) },
-          )
-          HorizontalDivider()
+        for ((folder, names) in groupByFolder(shown)) {
+          if (folder.isNotEmpty()) {
+            stickyHeader(key = "folder:$folder") {
+              Text(
+                folder,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                  .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+              )
+            }
+          }
+          items(names, key = { it }) { name ->
+            ListItem(
+              headlineContent = { Text(name.substringAfterLast('/')) },
+              modifier = Modifier.clickable { vm.screen = Screen.Entry(name) },
+            )
+          }
         }
       }
     }
   }
 }
+
+/**
+ * Entries grouped by folder: top-level entries first, then folders, both
+ * sorted alphabetically (ignoring case).
+ */
+private fun groupByFolder(names: List<String>): List<Pair<String, List<String>>> =
+  names.groupBy { it.substringBeforeLast('/', "") }
+    .mapValues { (_, v) -> v.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.substringAfterLast('/') }) }
+    .toList()
+    .sortedWith(compareBy<Pair<String, List<String>>> { it.first.isNotEmpty() }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.first })
 
 private sealed interface Decryption {
   data object Running : Decryption
@@ -330,7 +352,7 @@ private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor:
     onBack = back,
     actions = {
       TextButton(
-        onClick = { vm.save(name.trim(), EntryContent.of(password, notes), isNew) },
+        onClick = { vm.save(editor.name, name.trim(), EntryContent.of(password, notes)) },
         enabled = nameValid && password.isNotEmpty() && vm.busy == null,
       ) { Text("Save") }
     },
@@ -339,19 +361,23 @@ private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor:
       modifier.fillMaxSize().imePadding().padding(16.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      if (isNew) {
-        OutlinedTextField(
-          value = name,
-          onValueChange = { name = it.trim() },
-          label = { Text("Name") },
-          placeholder = { Text("web/example.com") },
-          supportingText = { Text("Use / to put the entry in a folder") },
-          isError = name.isNotEmpty() && !nameValid,
-          singleLine = true,
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
-          modifier = Modifier.fillMaxWidth(),
-        )
-      }
+      val renaming = !isNew && name != editor.name
+      OutlinedTextField(
+        value = name,
+        onValueChange = { name = it.trim() },
+        label = { Text("Name") },
+        placeholder = { Text("web/example.com") },
+        supportingText = {
+          Text(
+            if (renaming) "Renaming re-encrypts the entry for the recipients of its new location"
+            else "Use / to put the entry in a folder"
+          )
+        },
+        isError = name.isNotEmpty() && !nameValid,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+      )
       OutlinedTextField(
         value = password,
         onValueChange = { password = it.replace("\n", "") },

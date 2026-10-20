@@ -65,14 +65,30 @@ class Passage(context: Context) {
   /**
    * Encrypts and commits an entry (but does not push).
    *
+   * @param oldName the entry's current name, null for a new entry. If it
+   *   differs from [name], the entry is renamed (and re-encrypted for its
+   *   new location, like `passage mv`).
    * @return warnings for the user about the entry's recipients
    */
-  fun save(name: String, content: String, isNew: Boolean): List<String> {
+  fun save(oldName: String?, name: String, content: String): List<String> {
     require(PasswordStore.isValidName(name)) { "Invalid name. Use letters, digits and / to separate folders." }
-    if (isNew && store.exists(name)) throw IllegalArgumentException("An entry named $name already exists.")
-    store.encrypt(name, content.toByteArray())
-    val message = if (isNew) "Add given password for $name to store." else "Edit password for $name using Passage for Android."
-    repo.commit(message, author(), listOf(store.relativePath(name)))
+    if (name != oldName && store.exists(name)) throw IllegalArgumentException("An entry named $name already exists.")
+    val plaintext = content.toByteArray()
+    val (message, paths) = when (oldName) {
+      null -> {
+        store.encrypt(name, plaintext)
+        "Add given password for $name to store." to listOf(store.relativePath(name))
+      }
+      name -> {
+        store.encrypt(name, plaintext)
+        "Edit password for $name using Passage for Android." to listOf(store.relativePath(name))
+      }
+      else -> {
+        store.move(oldName, name, plaintext)
+        "Rename $oldName to $name." to listOf(store.relativePath(oldName), store.relativePath(name))
+      }
+    }
+    repo.commit(message, author(), paths)
     return recipientWarnings(name)
   }
 

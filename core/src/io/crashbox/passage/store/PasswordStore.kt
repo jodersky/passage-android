@@ -90,6 +90,19 @@ class PasswordStore(val root: File) {
     }
   }
 
+  /**
+   * Renames an entry, re-encrypting [plaintext] to the recipients of its new
+   * location (like `passage mv`). The old entry is only deleted once the new
+   * one is written.
+   */
+  fun move(from: String, to: String, plaintext: ByteArray) {
+    require(from != to) { "same name" }
+    if (exists(to)) throw FileAlreadyExistsException(file(to), reason = "an entry named $to already exists")
+    if (!exists(from)) throw FileNotFoundException("no entry $from")
+    encrypt(to, plaintext)
+    delete(from)
+  }
+
   /** Path of an entry's file, relative to [root]. */
   fun relativePath(name: String): String = file(name).relativeTo(root).invariantSeparatorsPath
 
