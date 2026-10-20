@@ -202,8 +202,8 @@ class P256TagTest {
       return X25519Keys(identity, recipient)
     }
     return X25519Keys(
-      "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33",
-      "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj"
+      "AGE-SECRET-KEY-1SDGAW3PX6VKMGXXCU2CH55AKG70F7JN9FLGCGW36H4VYQ7JCE4CSJK0HES",
+      "age1jv4kjj75uvgnjdj7pdpp4kfj9mnr47ak032af8tzqzx98lfae5qstrltlq"
     )
   }
 
