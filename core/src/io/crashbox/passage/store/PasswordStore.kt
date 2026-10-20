@@ -77,6 +77,22 @@ class PasswordStore(val root: File) {
     check(tmp.renameTo(file)) { "could not write $file" }
   }
 
+  fun exists(name: String): Boolean = file(name).isFile
+
+  /** Deletes an entry, and the directories it leaves empty. */
+  fun delete(name: String) {
+    val file = file(name)
+    if (!file.delete()) throw FileNotFoundException("no entry $name")
+    var dir = file.parentFile
+    while (dir != root && dir.list()?.isEmpty() == true) {
+      dir.delete()
+      dir = dir.parentFile
+    }
+  }
+
+  /** Path of an entry's file, relative to [root]. */
+  fun relativePath(name: String): String = file(name).relativeTo(root).invariantSeparatorsPath
+
   companion object {
     const val SUFFIX = ".age"
     const val RECIPIENTS_FILE = ".age-recipients"

@@ -80,6 +80,38 @@ class PasswordStoreTest {
   }
 
   @Test
+  fun deletesEntriesAndEmptyDirectories() {
+    listOf("a/b/c.age", "a/d.age", ".age-recipients").forEach { write(it) }
+    store.delete("a/b/c")
+    assertFalse(File(root, "a/b").exists())
+    assertTrue(File(root, "a/d.age").exists())
+    store.delete("a/d")
+    assertFalse(File(root, "a").exists())
+    assertTrue(File(root, ".age-recipients").exists())
+    assertFailsWith<FileNotFoundException> { store.delete("a/d") }
+  }
+
+  @Test
+  fun entryContent() {
+    assertEquals("pw\n", EntryContent.of("pw", "  \n"))
+    assertEquals("pw\nuser: me\nurl: x\n", EntryContent.of("pw", "user: me\nurl: x\n\n"))
+    val content = "pw\nuser: me\n"
+    assertEquals("pw", EntryContent.password(content))
+    assertEquals("user: me", EntryContent.notes(content))
+    assertEquals("", EntryContent.notes("pw"))
+    assertFailsWith<IllegalArgumentException> { EntryContent.of("a\nb", "") }
+  }
+
+  @Test
+  fun generatesPasswords() {
+    val pw = PasswordGenerator.generate()
+    assertEquals(25, pw.length)
+    assertTrue(pw.all { it.code in 33..126 }, pw)
+    assertTrue(PasswordGenerator.generate(40, symbols = false).all { it.isLetterOrDigit() })
+    assertEquals(1000, (1..1000).map { PasswordGenerator.generate() }.toSet().size)
+  }
+
+  @Test
   fun refusesUnsupportedRecipients() {
     for (r in listOf(
       "age1yubikey1qwt50d05nh5vutpdzmlg5wn80xq5negm4uj9ghv0snvdd3yysf5yw3rhl3t",

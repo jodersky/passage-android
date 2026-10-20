@@ -104,6 +104,69 @@ class GitRepoTest {
     assertNotNull(generateSequence<Throwable>(e) { it.cause }.firstOrNull { it.message?.contains("auth", ignoreCase = true) == true })
   }
 
+  private fun remoteHead(): String = Git.open(bare).use { git ->
+    git.repository.parseCommit(git.repository.resolve("refs/heads/main")).shortMessage
+  }
+
+  private fun remoteFile(path: String): String? = Git.open(bare).use { git ->
+    val repo = git.repository
+    val tree = repo.parseCommit(repo.resolve("refs/heads/main")).tree
+    org.eclipse.jgit.treewalk.TreeWalk.forPath(repo, path, tree)?.use { repo.open(it.getObjectId(0)).bytes.decodeToString() }
+  }
+
+  @Test
+  fun commitAndSync() {
+    trustServer()
+    val clone = repo("clone")
+    clone.clone(url)
+
+    File(clone.dir, "new.txt").writeText("new\n")
+    File(clone.dir, "hello.txt").delete()
+    clone.commit("change things", author, listOf("new.txt", "hello.txt"))
+    assertEquals(true, clone.hasUnpushedCommits())
+
+    commitToRemote("remote.txt", "concurrent\n") // the remote moved meanwhile
+    clone.sync()
+
+    assertEquals(false, clone.hasUnpushedCommits())
+    assertEquals("change things", remoteHead())
+    assertEquals("new\n", remoteFile("new.txt"))
+    assertEquals(null, remoteFile("hello.txt"))
+    assertEquals("concurrent\n", remoteFile("remote.txt"))
+  }
+
+  @Test
+  fun rejectedPushIsReported() {
+    trustServer()
+    val clone = repo("clone")
+    clone.clone(url)
+    File(clone.dir, "new.txt").writeText("new\n")
+    clone.commit("add new.txt", author, listOf("new.txt"))
+    commitToRemote("remote.txt", "concurrent\n")
+
+    assertFailsWith<PushRejectedException> { clone.push() } // not fast-forward
+    assertEquals("add remote.txt", remoteHead())
+  }
+
+  @Test
+  fun conflictingPullIsAborted() {
+    trustServer()
+    val clone = repo("clone")
+    clone.clone(url)
+    File(clone.dir, "hello.txt").writeText("local\n")
+    clone.commit("local edit", author, listOf("hello.txt"))
+    commitToRemote("hello.txt", "remote\n")
+
+    assertFailsWith<ConflictException> { clone.sync() }
+    // the local commit is kept as it was, and the repository is usable
+    Git.open(clone.dir).use { git ->
+      assertEquals(org.eclipse.jgit.lib.RepositoryState.SAFE, git.repository.repositoryState)
+      assertEquals("local edit", git.log().setMaxCount(1).call().first().shortMessage)
+    }
+    assertEquals("local\n", File(clone.dir, "hello.txt").readText())
+    assertEquals("remote\n", remoteFile("hello.txt"))
+  }
+
   @Test
   fun pullAndPush() {
     trustServer()
