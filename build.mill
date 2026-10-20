@@ -19,10 +19,17 @@ object core extends KotlinModule {
     mvn"com.exceptionfactory.jagged:jagged-bech32:1.0.0",
     mvn"com.exceptionfactory.jagged:jagged-x25519:1.0.0",
     mvn"com.exceptionfactory.jagged:jagged-ssh:1.0.0",
-    mvn"org.bouncycastle:bcprov-jdk18on:1.86"
+    mvn"com.hierynomus:sshj:0.41.2",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
+    // classes move between BouncyCastle jars across versions, so all of
+    // them must have the same version (sshj brings older ones)
+    mvn"org.bouncycastle:bcprov-jdk18on:1.86",
+    mvn"org.bouncycastle:bcpkix-jdk18on:1.86",
+    mvn"org.bouncycastle:bcutil-jdk18on:1.86"
   )
 
   object test extends KotlinTests, TestModule.Junit5 {
+    def moduleDeps = super.moduleDeps ++ Seq(testserver)
     def mvnDeps = Seq(
       mvn"org.jetbrains.kotlin:kotlin-test-junit5:2.0.21",
       mvn"com.github.sbt.junit:jupiter-interface:0.11.2"
@@ -30,14 +37,16 @@ object core extends KotlinModule {
   }
 }
 
-// Throwaway SSH server for testing the app against, on the desktop:
-// `mill testserver.run <authorized_keys> [port]`, then
+// Git over SSH server for testing, used by core's tests and runnable on the
+// desktop to test the app against:
+// `mill testserver.run <repos-dir> <authorized_keys> [port]`, then
 // `adb reverse tcp:2222 tcp:2222` so the phone can reach it.
 object testserver extends KotlinModule {
   def kotlinVersion = "2.0.21"
 
   def mvnDeps = Seq(
     mvn"org.apache.sshd:sshd-core:2.20.0",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
     mvn"org.slf4j:slf4j-simple:2.0.20"
   )
 }
@@ -62,17 +71,12 @@ object app extends AndroidAppKotlinModule {
     mvn"androidx.compose.ui:ui:1.7.6",
     mvn"androidx.lifecycle:lifecycle-runtime-compose:2.8.7",
     mvn"androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7",
-    mvn"com.hierynomus:sshj:0.41.2",
     // coursier ignores Gradle module metadata version constraints, so these
     // transitive artifacts must be pinned to avoid duplicate classes in d8
     mvn"androidx.collection:collection-jvm:1.4.4",
     mvn"androidx.collection:collection-ktx:1.4.4",
     mvn"androidx.lifecycle:lifecycle-common:2.8.7",
     mvn"androidx.lifecycle:lifecycle-process:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7",
-    // classes move between BouncyCastle jars across versions, so all of
-    // them must have the same version as core's bcprov
-    mvn"org.bouncycastle:bcpkix-jdk18on:1.86",
-    mvn"org.bouncycastle:bcutil-jdk18on:1.86"
+    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7"
   )
 }
