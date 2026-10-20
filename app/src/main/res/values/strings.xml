@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Passage</string>
+    <string name="autofill_search">Search Passage…</string>
 </resources>

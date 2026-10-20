@@ -75,6 +75,11 @@ class Passage(context: Context) {
     get() = prefs.getString("author_email", null) ?: "passage@android"
     set(value) = prefs.edit().putString("author_email", value).apply()
 
+  /** Filled as username by autofill for entries without a username line. */
+  var fallbackUsername: String
+    get() = prefs.getString("fallback_username", null) ?: ""
+    set(value) = prefs.edit().putString("fallback_username", value).apply()
+
   private fun author() = PersonIdent(authorName, authorEmail)
 
   /**

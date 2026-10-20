@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.view.WindowManager
+import android.view.autofill.AutofillManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.crashbox.passage.git.Change
 import io.crashbox.passage.git.Conflict
@@ -537,6 +539,14 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   var url by rememberSaveable { mutableStateOf(vm.passage.remoteUrl ?: "") }
   var authorName by rememberSaveable { mutableStateOf(vm.passage.authorName) }
   var authorEmail by rememberSaveable { mutableStateOf(vm.passage.authorEmail) }
+  var fallbackUsername by rememberSaveable { mutableStateOf(vm.passage.fallbackUsername) }
+  // re-checked when coming back from the system settings
+  val autofillManager = context.getSystemService(AutofillManager::class.java)
+  var autofillEnabled by remember { mutableStateOf(autofillManager.hasEnabledAutofillServices()) }
+  LifecycleResumeEffect(Unit) {
+    autofillEnabled = autofillManager.hasEnabledAutofillServices()
+    onPauseOrDispose {}
+  }
   // generating the keys the first time may take a moment
   var keys by remember { mutableStateOf<List<Triple<String, String, String>>?>(null) }
   LaunchedEffect(Unit) {
@@ -598,6 +608,32 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
         Text(if (hasRepo) "Clone again" else "Clone")
       }
       vm.busy?.let { Text(it) }
+
+      HorizontalDivider()
+      Text("Autofill", style = MaterialTheme.typography.titleMedium)
+      Text(
+        if (autofillEnabled) "Passage is your autofill service."
+        else "Passage is not your autofill service. In Chrome, also enable Settings → Autofill services → " +
+          "\"Autofill using another service\".",
+        style = MaterialTheme.typography.bodyMedium,
+      )
+      if (!autofillEnabled) {
+        Button(onClick = {
+          context.startActivity(
+            Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
+              .setData(android.net.Uri.parse("package:${context.packageName}"))
+          )
+        }) { Text("Use Passage for autofill") }
+      }
+      OutlinedTextField(
+        value = fallbackUsername,
+        onValueChange = { fallbackUsername = it; vm.passage.fallbackUsername = it.trim() },
+        label = { Text("Fallback username") },
+        supportingText = { Text("Filled for entries without a user:, username:, login: or email: line") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+      )
 
       HorizontalDivider()
       Text("Commit author", style = MaterialTheme.typography.titleMedium)
