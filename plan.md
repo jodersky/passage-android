@@ -93,3 +93,23 @@ Prove the riskiest parts before building any UI:
 3. on a desktop, encrypt a file to that recipient with the `age` CLI (>= 1.3)
 4. decrypt the file on the phone through the custom `p256tag` stanza reader
 5. as a bonus: sign an SSH auth request with a StrongBox ECDSA key via sshj
+
+### Results (2026-10-20, Pixel 9a)
+
+Steps 1-4 succeeded:
+- the key reports security level StrongBox
+- a file encrypted by `age` 1.3.2 to the phone's recipient (plus an X25519
+  recipient) decrypts on the phone, in ~60-120 ms per file
+- jagged works with Android's default crypto provider (X25519 and
+  ChaCha20-Poly1305 are available), no extra provider needed
+- desktop tests (`mill core.test`) cover the RFC 9180 test vector and
+  interoperability with the `age` CLI in both directions
+
+Learned:
+- the spike key has no user authentication requirement, so any code running
+  as the app can use it, even while the phone is locked. The real key must at
+  least set `setUnlockedDeviceRequired(true)`; see the unlock policy question.
+- `mill app.androidInstall` only targets the emulator; use
+  `adb install -r out/app/androidApk.dest/app.apk` for a real device.
+- coursier ignores Gradle module metadata, so some AndroidX artifacts must be
+  pinned in `build.mill` to avoid duplicate classes in d8.
