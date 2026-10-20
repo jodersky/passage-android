@@ -41,6 +41,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,6 +74,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.crashbox.passage.git.Change
+import io.crashbox.passage.git.Conflict
+import io.crashbox.passage.git.Resolution
 import io.crashbox.passage.store.EntryContent
 import io.crashbox.passage.store.PasswordGenerator
 import io.crashbox.passage.store.PasswordStore
@@ -112,6 +116,10 @@ fun PassageUi(vm: MainViewModel) {
       EntryScreen(vm, snackbar, screen.name)
     }
     is Screen.Editor -> EditorScreen(vm, snackbar, screen)
+    Screen.Conflicts -> {
+      BackHandler { vm.screen = Screen.Entries }
+      ConflictsScreen(vm, snackbar)
+    }
     Screen.Settings -> {
       if (vm.passage.repo.exists()) BackHandler { vm.screen = Screen.Entries }
       SettingsScreen(vm, snackbar)
@@ -176,6 +184,7 @@ private fun Page(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
+  val activity = LocalContext.current as ComponentActivity
   var query by rememberSaveable { mutableStateOf("") }
   val shown = vm.entries.filter { it.contains(query.trim(), ignoreCase = true) }
   Page(
@@ -183,7 +192,7 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
     vm,
     snackbar,
     actions = {
-      IconButton(onClick = { vm.sync() }, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
+      IconButton(onClick = { vm.sync(activity) }, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
       IconButton(onClick = { vm.screen = Screen.Settings }) { Icon(Icons.Default.Settings, "Settings") }
     },
     fab = {
@@ -191,12 +200,18 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
     },
   ) { modifier ->
     Column(modifier.fillMaxSize()) {
-      if (vm.unpushed && vm.busy == null) {
-        Text(
-          "Some changes are not pushed yet. Sync to retry.",
-          style = MaterialTheme.typography.bodySmall,
-          modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(12.dp),
-        )
+      if (vm.busy == null) {
+        val n = vm.conflicts.size
+        when {
+          n > 0 -> Banner(
+            "${if (n == 1) "1 entry conflicts" else "$n entries conflict"} with changes on the server. Tap to resolve.",
+            onClick = { vm.screen = Screen.Conflicts },
+          )
+          vm.pendingReencryption.isNotEmpty() -> Banner(
+            "${vm.pendingReencryption.size} entries must be re-encrypted for updated recipients before pushing. Sync to continue."
+          )
+          vm.unpushed -> Banner("Some changes are not pushed yet. Sync to push them.")
+        }
       }
       OutlinedTextField(
         value = query,
@@ -226,6 +241,79 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
             )
           }
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun Banner(text: String, onClick: (() -> Unit)? = null) {
+  Text(
+    text,
+    style = MaterialTheme.typography.bodySmall,
+    modifier = Modifier.fillMaxWidth()
+      .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+      .background(MaterialTheme.colorScheme.secondaryContainer)
+      .padding(12.dp),
+  )
+}
+
+private fun Change.verb() = when (this) {
+  Change.ADDED -> "added"
+  Change.MODIFIED -> "edited"
+  Change.DELETED -> "deleted"
+}
+
+private fun Conflict.description(): String =
+  if (local == remote) "${local.verb().replaceFirstChar { it.uppercase() }} here and on the server"
+  else "${local.verb().replaceFirstChar { it.uppercase() }} here, ${remote.verb()} on the server"
+
+@Composable
+private fun ConflictsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
+  val activity = LocalContext.current as ComponentActivity
+  var choices by remember { mutableStateOf(mapOf<String, Resolution>()) }
+  val complete = vm.conflicts.all { it.path in choices }
+
+  Page(
+    "Resolve conflicts",
+    vm,
+    snackbar,
+    onBack = { vm.screen = Screen.Entries },
+    actions = {
+      TextButton(
+        onClick = { vm.resolve(activity, choices.filterKeys { p -> vm.conflicts.any { it.path == p } }) },
+        enabled = complete && vm.busy == null,
+      ) { Text("Resolve") }
+    },
+  ) { modifier ->
+    LazyColumn(modifier.fillMaxSize()) {
+      item {
+        Text(
+          "These entries were changed both on this phone and on the server since the last sync. " +
+            "Choose which version to keep. \"Keep both\" keeps the server's version and saves yours as a copy.",
+          style = MaterialTheme.typography.bodyMedium,
+          modifier = Modifier.padding(16.dp),
+        )
+      }
+      items(vm.conflicts, key = { it.path }) { conflict ->
+        val choice = choices[conflict.path]
+        fun option(resolution: Resolution, label: String) = @Composable {
+          FilterChip(
+            selected = choice == resolution,
+            onClick = { choices = choices + (conflict.path to resolution) },
+            label = { Text(label) },
+          )
+        }
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(PasswordStore.entryName(conflict.path) ?: conflict.path, style = MaterialTheme.typography.titleMedium)
+          Text(conflict.description(), style = MaterialTheme.typography.bodySmall)
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            option(Resolution.MINE, if (conflict.local == Change.DELETED) "Delete (mine)" else "Keep mine")()
+            option(Resolution.THEIRS, if (conflict.remote == Change.DELETED) "Delete (theirs)" else "Keep theirs")()
+            if (conflict.canKeepBoth) option(Resolution.BOTH, "Keep both")()
+          }
+        }
+        HorizontalDivider()
       }
     }
   }

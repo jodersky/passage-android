@@ -36,14 +36,8 @@ class PasswordStore(val root: File) {
 
   /** The `.age-recipients` file that applies to [name], as passage looks it up. */
   fun recipientsFile(name: String): File? {
-    var dir: File? = file(name).parentFile
-    while (dir != null) {
-      val candidate = File(dir, RECIPIENTS_FILE)
-      if (candidate.isFile) return candidate
-      if (dir == root) break
-      dir = dir.parentFile
-    }
-    return null
+    require(isValidName(name)) { "invalid entry name: $name" }
+    return recipientsPaths(name).map { File(root, it) }.firstOrNull { it.isFile }
   }
 
   /**
@@ -109,6 +103,23 @@ class PasswordStore(val root: File) {
   companion object {
     const val SUFFIX = ".age"
     const val RECIPIENTS_FILE = ".age-recipients"
+
+    /** Candidate `.age-recipients` paths for [name], nearest first, relative to the root. */
+    private fun recipientsPaths(name: String): List<String> {
+      val dirs = name.split('/').dropLast(1)
+      return (dirs.size downTo 0).map { n -> (dirs.take(n) + RECIPIENTS_FILE).joinToString("/") }
+    }
+
+    /**
+     * The recipients for [name] in any version of a store, where [read]
+     * returns the content of a file (relative to the root) or null.
+     */
+    fun recipientsIn(name: String, read: (String) -> String?): List<String>? =
+      recipientsPaths(name).firstNotNullOfOrNull(read)?.let(::parseRecipients)
+
+    /** The entry stored at [path] (relative to the root), if it is one. */
+    fun entryName(path: String): String? =
+      path.removeSuffix(SUFFIX).takeIf { path.endsWith(SUFFIX) && isValidName(it) }
 
     fun isValidName(name: String): Boolean =
       name.isNotEmpty() && name.split('/').none { it.isEmpty() || it == "." || it == ".." || it.startsWith(".") }

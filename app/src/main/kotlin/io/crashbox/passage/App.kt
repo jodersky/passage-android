@@ -3,10 +3,13 @@ package io.crashbox.passage
 import android.app.Application
 import android.content.Context
 import io.crashbox.passage.age.NoMatchingStanzaException
+import io.crashbox.passage.git.Divergence
 import io.crashbox.passage.git.GitRepo
 import io.crashbox.passage.git.KnownHosts
+import io.crashbox.passage.git.Resolution
 import io.crashbox.passage.git.SshjSessionFactory
 import io.crashbox.passage.store.PasswordStore
+import io.crashbox.passage.store.StoreSync
 import java.io.File
 import javax.crypto.KeyAgreement
 import net.schmizz.sshj.common.SecurityUtils
@@ -39,6 +42,18 @@ class Passage(context: Context) {
   val knownHosts = KnownHosts(File(context.filesDir, "known_hosts"))
   val repo = GitRepo(File(context.filesDir, "store"), SshjSessionFactory(Keys::sshKeyPair, knownHosts))
   val store = PasswordStore(repo.dir)
+  val sync = StoreSync(repo, store)
+
+  /**
+   * Entries encrypted to outdated recipients after a sync. They must be
+   * re-encrypted (which needs the user) before pushing. Persisted, so that an
+   * interrupted sync cannot push them as they are.
+   */
+  var pendingReencryption: Set<String>
+    get() = prefs.getStringSet("pending_reencryption", null) ?: emptySet()
+    set(value) {
+      prefs.edit().putStringSet("pending_reencryption", value).commit()
+    }
 
   /** Replaces the local clone, if any, by a fresh clone of [url]. */
   fun clone(url: String) {
@@ -90,6 +105,19 @@ class Passage(context: Context) {
     }
     repo.commit(message, author(), paths)
     return recipientWarnings(name)
+  }
+
+  /** Re-encrypts an entry for its current recipients, and commits it. */
+  fun reencrypt(name: String, authorize: (KeyAgreement) -> Unit) {
+    val content = decrypt(name, authorize)
+    store.encrypt(name, content.toByteArray())
+    repo.commit("Reencrypt $name for updated recipients.", author(), listOf(store.relativePath(name)))
+  }
+
+  /** Integrates fetched remote changes (see [StoreSync.integrate]) and records entries to re-encrypt. */
+  fun integrate(divergence: Divergence, resolutions: Map<String, Resolution>) {
+    val stale = sync.integrate(divergence, resolutions, author())
+    pendingReencryption = pendingReencryption + stale
   }
 
   /** Deletes and commits an entry (but does not push). */
