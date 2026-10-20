@@ -10,6 +10,7 @@ import io.crashbox.passage.store.PasswordStore
 import java.io.File
 import javax.crypto.KeyAgreement
 import net.schmizz.sshj.common.SecurityUtils
+import org.eclipse.jgit.lib.PersonIdent
 
 class App : Application() {
   val passage: Passage by lazy { Passage(this) }
@@ -49,6 +50,47 @@ class Passage(context: Context) {
       throw e
     }
     remoteUrl = url
+  }
+
+  var authorName: String
+    get() = prefs.getString("author_name", null) ?: "Passage"
+    set(value) = prefs.edit().putString("author_name", value).apply()
+
+  var authorEmail: String
+    get() = prefs.getString("author_email", null) ?: "passage@android"
+    set(value) = prefs.edit().putString("author_email", value).apply()
+
+  private fun author() = PersonIdent(authorName, authorEmail)
+
+  /**
+   * Encrypts and commits an entry (but does not push).
+   *
+   * @return warnings for the user about the entry's recipients
+   */
+  fun save(name: String, content: String, isNew: Boolean): List<String> {
+    require(PasswordStore.isValidName(name)) { "Invalid name. Use letters, digits and / to separate folders." }
+    if (isNew && store.exists(name)) throw IllegalArgumentException("An entry named $name already exists.")
+    store.encrypt(name, content.toByteArray())
+    val message = if (isNew) "Add given password for $name to store." else "Edit password for $name using Passage for Android."
+    repo.commit(message, author(), listOf(store.relativePath(name)))
+    return recipientWarnings(name)
+  }
+
+  /** Deletes and commits an entry (but does not push). */
+  fun delete(name: String) {
+    val path = store.relativePath(name)
+    store.delete(name)
+    repo.commit("Remove $name from store.", author(), listOf(path))
+  }
+
+  private fun recipientWarnings(name: String): List<String> {
+    val recipients = store.recipients(name)
+    val phone = Keys.ageRecipient.toString()
+    return when {
+      phone !in recipients -> listOf("This phone is not a recipient of $name, so it cannot read it back.")
+      recipients.size == 1 -> listOf("This phone is the only recipient of $name: it will be lost if the phone is.")
+      else -> emptyList()
+    }
   }
 
   fun decrypt(name: String, authorize: (KeyAgreement) -> Unit): String =

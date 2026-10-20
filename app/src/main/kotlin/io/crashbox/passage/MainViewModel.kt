@@ -17,6 +17,10 @@ import kotlinx.coroutines.withContext
 sealed interface Screen {
   data object Entries : Screen
   data class Entry(val name: String) : Screen
+  /** Editing an entry; [name] is null for a new one. */
+  class Editor(val name: String?, val content: String) : Screen {
+    override fun toString() = "Editor($name)" // never show the content
+  }
   data object Settings : Screen
 }
 
@@ -29,10 +33,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   var screen: Screen by mutableStateOf(if (passage.repo.exists()) Screen.Entries else Screen.Settings)
   var entries: List<String> by mutableStateOf(emptyList())
     private set
+  /** whether there are local commits that were not pushed yet */
+  var unpushed: Boolean by mutableStateOf(false)
+    private set
   /** what is running in the background, if anything */
   var busy: String? by mutableStateOf(null)
     private set
   var error: String? by mutableStateOf(null)
+  /** a short message for the user */
+  var notice: String? by mutableStateOf(null)
   var hostKeyQuestion: HostKeyQuestion? by mutableStateOf(null)
 
   init {
@@ -41,40 +50,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   private fun refresh() {
     viewModelScope.launch {
-      entries = withContext(Dispatchers.IO) { if (passage.repo.exists()) passage.store.entries() else emptyList() }
+      withContext(Dispatchers.IO) {
+        if (passage.repo.exists()) passage.store.entries() to passage.repo.hasUnpushedCommits() else emptyList<String>() to false
+      }.let { (e, u) ->
+        entries = e
+        unpushed = u
+      }
     }
   }
 
-  /** Runs a remote git operation, asking the user about unknown host keys. */
-  private fun remote(label: String, onSuccess: () -> Unit = {}, op: () -> Unit) {
+  /**
+   * Runs [op] in the background, one operation at a time. For remote
+   * operations, asks the user about unknown host keys and retries.
+   */
+  private fun run(label: String, onSuccess: () -> Unit = {}, op: () -> Unit) {
     if (busy != null) return
     busy = label
     viewModelScope.launch {
-      try {
-        withContext(Dispatchers.IO) { op() }
-        refresh()
-        onSuccess()
-      } catch (e: Exception) {
+      val result = runCatching { withContext(Dispatchers.IO) { op() } }
+      busy = null
+      refresh()
+      result.onSuccess { onSuccess() }.onFailure { e ->
         when (val problem = hostKeyProblem(e)) {
           is UnknownHostKeyException -> hostKeyQuestion = HostKeyQuestion(problem.hostKey) {
             hostKeyQuestion = null
             passage.knownHosts.trust(problem.hostKey)
-            remote(label, onSuccess, op)
+            run(label, onSuccess, op)
           }
           is HostKeyChangedException -> error =
             "The host key of ${problem.hostKey.host} has CHANGED to ${problem.hostKey.type} " +
               "${problem.hostKey.fingerprint}. Someone could be intercepting the connection. Not connecting."
           else -> error = describe(e)
         }
-      } finally {
-        busy = null
       }
     }
   }
 
-  fun clone(url: String) = remote("Cloning…", onSuccess = { screen = Screen.Entries }) { passage.clone(url) }
+  fun clone(url: String) = run("Cloning…", onSuccess = { screen = Screen.Entries }) { passage.clone(url) }
 
-  fun sync() = remote("Syncing…") { passage.repo.pull() }
+  /** Pulls and pushes; [announce] tells the user when done. */
+  fun sync(announce: Boolean = true) =
+    run("Syncing…", onSuccess = { if (announce) notice = "Synced" }) { passage.repo.sync() }
+
+  fun save(name: String, content: String, isNew: Boolean) {
+    var warnings = emptyList<String>()
+    run("Saving…", onSuccess = {
+      screen = Screen.Entries
+      notice = (listOf("Saved $name") + warnings).joinToString("\n")
+      sync(announce = false)
+    }) { warnings = passage.save(name, content, isNew) }
+  }
+
+  fun delete(name: String) = run("Deleting…", onSuccess = {
+    screen = Screen.Entries
+    notice = "Deleted $name"
+    sync(announce = false)
+  }) { passage.delete(name) }
 }
 
 /** A message for the user: the most specific one in the cause chain. */

@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -19,14 +20,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -34,6 +40,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +50,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -58,8 +67,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.crashbox.passage.store.EntryContent
+import io.crashbox.passage.store.PasswordGenerator
+import io.crashbox.passage.store.PasswordStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -81,15 +96,24 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun PassageUi(vm: MainViewModel) {
+  val snackbar = remember { SnackbarHostState() }
+  LaunchedEffect(vm.notice) {
+    vm.notice?.let {
+      snackbar.showSnackbar(it, withDismissAction = true)
+      vm.notice = null
+    }
+  }
+
   when (val screen = vm.screen) {
-    Screen.Entries -> EntriesScreen(vm)
+    Screen.Entries -> EntriesScreen(vm, snackbar)
     is Screen.Entry -> {
       BackHandler { vm.screen = Screen.Entries }
-      EntryScreen(vm, screen.name)
+      EntryScreen(vm, snackbar, screen.name)
     }
+    is Screen.Editor -> EditorScreen(vm, snackbar, screen)
     Screen.Settings -> {
       if (vm.passage.repo.exists()) BackHandler { vm.screen = Screen.Entries }
-      SettingsScreen(vm)
+      SettingsScreen(vm, snackbar)
     }
   }
 
@@ -122,8 +146,10 @@ fun PassageUi(vm: MainViewModel) {
 private fun Page(
   title: String,
   vm: MainViewModel,
+  snackbar: SnackbarHostState,
   onBack: (() -> Unit)? = null,
   actions: @Composable () -> Unit = {},
+  fab: @Composable () -> Unit = {},
   content: @Composable (Modifier) -> Unit,
 ) {
   Scaffold(
@@ -141,22 +167,35 @@ private fun Page(
         if (vm.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth())
       }
     },
+    floatingActionButton = fab,
+    snackbarHost = { SnackbarHost(snackbar) },
   ) { padding -> content(Modifier.padding(padding)) }
 }
 
 @Composable
-private fun EntriesScreen(vm: MainViewModel) {
+private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   var query by rememberSaveable { mutableStateOf("") }
   val shown = vm.entries.filter { it.contains(query.trim(), ignoreCase = true) }
   Page(
     "Passage",
     vm,
+    snackbar,
     actions = {
-      IconButton(onClick = vm::sync, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
+      IconButton(onClick = { vm.sync() }, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
       IconButton(onClick = { vm.screen = Screen.Settings }) { Icon(Icons.Default.Settings, "Settings") }
+    },
+    fab = {
+      FloatingActionButton(onClick = { vm.screen = Screen.Editor(null, "") }) { Icon(Icons.Default.Add, "Add") }
     },
   ) { modifier ->
     Column(modifier.fillMaxSize()) {
+      if (vm.unpushed && vm.busy == null) {
+        Text(
+          "Some changes are not pushed yet. Sync to retry.",
+          style = MaterialTheme.typography.bodySmall,
+          modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(12.dp),
+        )
+      }
       OutlinedTextField(
         value = query,
         onValueChange = { query = it },
@@ -187,13 +226,14 @@ private sealed interface Decryption {
 }
 
 @Composable
-private fun EntryScreen(vm: MainViewModel, name: String) {
+private fun EntryScreen(vm: MainViewModel, snackbar: SnackbarHostState, name: String) {
   val activity = LocalContext.current as ComponentActivity
   // the decrypted content only lives in this screen's state: it is gone
   // when leaving the screen
   var attempt by remember { mutableStateOf(0) }
   var state: Decryption by remember { mutableStateOf(Decryption.Running) }
   var revealed by remember { mutableStateOf(false) }
+  var confirmDelete by remember { mutableStateOf(false) }
 
   LaunchedEffect(name, attempt) {
     state = Decryption.Running
@@ -205,7 +245,20 @@ private fun EntryScreen(vm: MainViewModel, name: String) {
     }
   }
 
-  Page(name, vm, onBack = { vm.screen = Screen.Entries }) { modifier ->
+  Page(
+    name,
+    vm,
+    snackbar,
+    onBack = { vm.screen = Screen.Entries },
+    actions = {
+      (state as? Decryption.Done)?.let { done ->
+        IconButton(onClick = { vm.screen = Screen.Editor(name, done.content) }) { Icon(Icons.Default.Edit, "Edit") }
+      }
+      // deleting does not need the content, so it is possible even for
+      // entries this phone cannot decrypt
+      IconButton(onClick = { confirmDelete = true }, enabled = vm.busy == null) { Icon(Icons.Default.Delete, "Delete") }
+    },
+  ) { modifier ->
     Column(
       modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -217,8 +270,8 @@ private fun EntryScreen(vm: MainViewModel, name: String) {
           Button(onClick = { attempt++ }) { Text("Try again") }
         }
         is Decryption.Done -> {
-          val password = s.content.substringBefore('\n')
-          val rest = s.content.substringAfter('\n', "").trimEnd()
+          val password = EntryContent.password(s.content)
+          val notes = EntryContent.notes(s.content)
           Text(
             if (revealed) password else "••••••••••••",
             style = MaterialTheme.typography.headlineSmall,
@@ -228,13 +281,121 @@ private fun EntryScreen(vm: MainViewModel, name: String) {
             Button(onClick = { copySecret(activity, password) }) { Text("Copy") }
             OutlinedButton(onClick = { revealed = !revealed }) { Text(if (revealed) "Hide" else "Show") }
           }
-          if (rest.isNotEmpty()) {
+          if (notes.isNotEmpty()) {
             HorizontalDivider()
-            SelectionContainer { Text(rest, fontFamily = FontFamily.Monospace) }
+            SelectionContainer { Text(notes, fontFamily = FontFamily.Monospace) }
           }
         }
       }
     }
+  }
+
+  if (confirmDelete) {
+    AlertDialog(
+      onDismissRequest = { confirmDelete = false },
+      title = { Text("Delete $name?") },
+      text = { Text("The entry is removed from the store, for all devices once synced. It can still be recovered from the git history.") },
+      confirmButton = {
+        TextButton(onClick = {
+          confirmDelete = false
+          vm.delete(name)
+        }) { Text("Delete") }
+      },
+      dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
+  }
+}
+
+@Composable
+private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor: Screen.Editor) {
+  val isNew = editor.name == null
+  // not rememberSaveable: the content must not end up in saved instance state
+  var name by remember { mutableStateOf(editor.name ?: "") }
+  var password by remember { mutableStateOf(EntryContent.password(editor.content)) }
+  var notes by remember { mutableStateOf(EntryContent.notes(editor.content)) }
+  var revealed by remember { mutableStateOf(isNew) }
+  var confirmDiscard by remember { mutableStateOf(false) }
+
+  val dirty = name != (editor.name ?: "") ||
+    password != EntryContent.password(editor.content) ||
+    notes != EntryContent.notes(editor.content)
+  val nameValid = PasswordStore.isValidName(name)
+  val back = { if (dirty) confirmDiscard = true else vm.screen = if (isNew) Screen.Entries else Screen.Entry(editor.name!!) }
+  BackHandler(onBack = back)
+
+  Page(
+    if (isNew) "New entry" else "Edit ${editor.name}",
+    vm,
+    snackbar,
+    onBack = back,
+    actions = {
+      TextButton(
+        onClick = { vm.save(name.trim(), EntryContent.of(password, notes), isNew) },
+        enabled = nameValid && password.isNotEmpty() && vm.busy == null,
+      ) { Text("Save") }
+    },
+  ) { modifier ->
+    Column(
+      modifier.fillMaxSize().imePadding().padding(16.dp).verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      if (isNew) {
+        OutlinedTextField(
+          value = name,
+          onValueChange = { name = it.trim() },
+          label = { Text("Name") },
+          placeholder = { Text("web/example.com") },
+          supportingText = { Text("Use / to put the entry in a folder") },
+          isError = name.isNotEmpty() && !nameValid,
+          singleLine = true,
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+      OutlinedTextField(
+        value = password,
+        onValueChange = { password = it.replace("\n", "") },
+        label = { Text("Password") },
+        singleLine = true,
+        visualTransformation = if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
+        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        trailingIcon = { TextButton(onClick = { revealed = !revealed }) { Text(if (revealed) "Hide" else "Show") } },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { password = PasswordGenerator.generate() }) { Text("Generate") }
+        OutlinedButton(onClick = { password = PasswordGenerator.generate(symbols = false) }) { Text("Generate (no symbols)") }
+      }
+      OutlinedTextField(
+        value = notes,
+        onValueChange = { notes = it },
+        label = { Text("Notes") },
+        placeholder = { Text("user: me\nurl: https://example.com") },
+        minLines = 4,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Text(
+        "The entry is encrypted to the recipients in the nearest .age-recipients file, then committed and pushed.",
+        style = MaterialTheme.typography.bodySmall,
+      )
+    }
+  }
+
+  if (confirmDiscard) {
+    AlertDialog(
+      onDismissRequest = { confirmDiscard = false },
+      title = { Text("Discard changes?") },
+      confirmButton = {
+        TextButton(onClick = {
+          confirmDiscard = false
+          vm.screen = if (isNew) Screen.Entries else Screen.Entry(editor.name!!)
+        }) { Text("Discard") }
+      },
+      dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") } },
+    )
   }
 }
 
@@ -256,10 +417,12 @@ private fun copySecret(context: Context, secret: String) {
 }
 
 @Composable
-private fun SettingsScreen(vm: MainViewModel) {
+private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val context = LocalContext.current
   val hasRepo = vm.passage.repo.exists()
   var url by rememberSaveable { mutableStateOf(vm.passage.remoteUrl ?: "") }
+  var authorName by rememberSaveable { mutableStateOf(vm.passage.authorName) }
+  var authorEmail by rememberSaveable { mutableStateOf(vm.passage.authorEmail) }
   // generating the keys the first time may take a moment
   var keys by remember { mutableStateOf<List<Triple<String, String, String>>?>(null) }
   LaunchedEffect(Unit) {
@@ -271,9 +434,9 @@ private fun SettingsScreen(vm: MainViewModel) {
     }
   }
 
-  Page("Settings", vm, onBack = if (hasRepo) ({ vm.screen = Screen.Entries }) else null) { modifier ->
+  Page("Settings", vm, snackbar, onBack = if (hasRepo) ({ vm.screen = Screen.Entries }) else null) { modifier ->
     Column(
-      modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+      modifier.fillMaxSize().imePadding().padding(16.dp).verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
       Text("This phone's keys", style = MaterialTheme.typography.titleMedium)
@@ -308,6 +471,7 @@ private fun SettingsScreen(vm: MainViewModel) {
         label = { Text("URL") },
         placeholder = { Text("git@github.com:me/passwords.git") },
         singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
       )
       if (hasRepo) {
@@ -320,6 +484,24 @@ private fun SettingsScreen(vm: MainViewModel) {
         Text(if (hasRepo) "Clone again" else "Clone")
       }
       vm.busy?.let { Text(it) }
+
+      HorizontalDivider()
+      Text("Commit author", style = MaterialTheme.typography.titleMedium)
+      OutlinedTextField(
+        value = authorName,
+        onValueChange = { authorName = it; vm.passage.authorName = it.trim() },
+        label = { Text("Name") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+      )
+      OutlinedTextField(
+        value = authorEmail,
+        onValueChange = { authorEmail = it; vm.passage.authorEmail = it.trim() },
+        label = { Text("Email") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+      )
     }
   }
 }
