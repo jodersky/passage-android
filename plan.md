@@ -75,11 +75,17 @@ devices are not a goal.
   `.age-recipients` always contains at least one other recipient (a desktop
   or a backup key). The app warns when its own recipient is the only one.
 
+### Unlock policy
+
+- the age key requires user authentication (fingerprint or device
+  credential) for every decryption: the prompt is bound to the single ECDH
+  operation (`BiometricPrompt.CryptoObject(KeyAgreement)`, API 36.1+, hence
+  minSdk 37)
+- both keys only work while the device is unlocked
+- the SSH key does not require authentication beyond that
+
 ## Open questions
 
-- unlock policy: user authentication for every decryption, or once per session
-  with a timeout (e.g. 5 minutes)? StrongBox operations take a few hundred ms,
-  so both are workable.
 - post-quantum `age1tagpq` (ML-KEM-768 + P-256): ML-KEM is not available in
   Keystore, so that half would be a software key (encrypted at rest with a
   Keystore key). An attacker would still need the hardware P-256 key. Deferred

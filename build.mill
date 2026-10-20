@@ -5,7 +5,9 @@ package build
 import mill.*, androidlib.*, kotlinlib.*
 
 object androidSdkModule0 extends AndroidSdkModule {
-  def buildToolsVersion = "35.0.0"
+  def buildToolsVersion = "37.0.0"
+  // API 36.1+ is needed for BiometricPrompt.CryptoObject(KeyAgreement)
+  def platformsVersion = "android-37.0"
 }
 
 // Platform-independent logic (age, crypto glue). Plain JVM module so that it
@@ -54,8 +56,8 @@ object testserver extends KotlinModule {
 object app extends AndroidAppKotlinModule {
   def kotlinVersion = "2.0.21"
   def androidSdkModule = mill.api.ModuleRef(androidSdkModule0)
-  def androidCompileSdk = 35
-  def androidMinSdk = 35
+  def androidCompileSdk = 37
+  def androidMinSdk = 37
   def androidEnableCompose = true
   def androidIsDebug = true
 
@@ -63,6 +65,31 @@ object app extends AndroidAppKotlinModule {
   def androidApplicationNamespace = "io.crashbox.passage"
 
   def moduleDeps = Seq(core)
+
+  // mill only packages the classes and META-INF of dependency jars, but
+  // some need their other resources at runtime (e.g. jgit's message
+  // bundles), like the Android Gradle plugin does
+  def androidPackageableExtraFiles = Task {
+    val seen = collection.mutable.Set.empty[os.RelPath]
+    androidPackagedDeps()
+      .filter(ref => ref.path.ext == "jar" && ref != androidSdkModule().androidJarPath())
+      .zipWithIndex
+      .flatMap { case (ref, i) =>
+        val zip = new java.util.zip.ZipFile(ref.path.toIO)
+        try {
+          import scala.jdk.CollectionConverters.*
+          zip.entries().asScala.toSeq.map(e => e: java.util.zip.ZipEntry)
+            .filter(e => !e.isDirectory && !e.getName.endsWith(".class") && !e.getName.startsWith("META-INF/"))
+            .map(e => os.RelPath(e.getName) -> e)
+            .filter { case (rel, _) => seen.add(rel) } // first jar wins
+            .map { case (rel, e) =>
+              val dest = Task.dest / i.toString / rel
+              os.write(dest, zip.getInputStream(e), createFolders = true)
+              mill.androidlib.AndroidPackageableExtraFile(PathRef(dest), rel)
+            }
+        } finally zip.close()
+      }
+  }
 
   def mvnDeps: T[Seq[Dep]] = Seq(
     mvn"androidx.core:core-ktx:1.15.0",

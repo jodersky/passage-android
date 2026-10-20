@@ -96,7 +96,7 @@ class P256TagTest {
     val theirs = softwareKey()
     val fileKey = FileKey()
     val reader = P256TagRecipientStanzaReader(ours)
-    assertFailsWith<UnsupportedRecipientStanzaException> {
+    assertFailsWith<NoMatchingStanzaException> {
       reader.getFileKey(listOf(stanzaFor(theirs, fileKey)))
     }
     assertEquals(0, ours.count)

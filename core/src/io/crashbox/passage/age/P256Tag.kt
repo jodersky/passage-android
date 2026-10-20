@@ -79,15 +79,21 @@ interface P256KeyAgreement {
 /**
  * ECDH through the JCA. With the Android Keystore provider, the private key
  * never leaves the secure hardware.
+ *
+ * @param authorize called with the initialized key agreement before it is
+ *   used, for keys that require user authentication for every operation.
+ *   Blocks until the user authenticated, or throws.
  */
 class JcaP256KeyAgreement(
   private val privateKey: PrivateKey,
   override val publicKey: ECPublicKey,
-  private val provider: String? = null
+  private val provider: String? = null,
+  private val authorize: (KeyAgreement) -> Unit = {},
 ) : P256KeyAgreement {
   override fun agree(peer: ECPublicKey): ByteArray {
     val ka = if (provider == null) KeyAgreement.getInstance("ECDH") else KeyAgreement.getInstance("ECDH", provider)
     ka.init(privateKey)
+    authorize(ka)
     ka.doPhase(peer, true)
     return ka.generateSecret()
   }
@@ -110,6 +116,10 @@ class P256TagRecipientStanzaWriter(private val recipient: P256TagRecipient) : Re
     return listOf(Stanza(args, sealed.ciphertext))
   }
 }
+
+/** The file has no stanza addressed to [recipient]: it was not encrypted to this identity. */
+class NoMatchingStanzaException(val recipient: P256TagRecipient) :
+  UnsupportedRecipientStanzaException("no $STANZA_TYPE Recipient Stanza for $recipient")
 
 class P256TagRecipientStanzaReader(private val key: P256KeyAgreement) : RecipientStanzaReader {
   private val recipient = P256TagRecipient.of(key.publicKey)
@@ -136,7 +146,7 @@ class P256TagRecipientStanzaReader(private val key: P256KeyAgreement) : Recipien
       val dh = key.agree(peer)
       return FileKey(Hpke.openBase(dh, enc, recipient.uncompressed, LABEL, ByteArray(0), body))
     }
-    throw UnsupportedRecipientStanzaException("$STANZA_TYPE Recipient Stanza not matched")
+    throw NoMatchingStanzaException(recipient)
   }
 
   private fun decodeBase64(encoded: String, length: Int, name: String): ByteArray {
