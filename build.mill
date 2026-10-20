@@ -53,16 +53,46 @@ object testserver extends KotlinModule {
   )
 }
 
-object app extends AndroidAppKotlinModule {
+/** The app; built in two variants, [[app]] and [[release]], from the same sources (in `app/`). */
+trait PassageApp extends AndroidAppKotlinModule {
   def kotlinVersion = "2.0.21"
   def androidSdkModule = mill.api.ModuleRef(androidSdkModule0)
   def androidCompileSdk = 37
   def androidMinSdk = 37
   def androidEnableCompose = true
-  def androidIsDebug = true
 
-  def androidApplicationId = "io.crashbox.passage"
   def androidApplicationNamespace = "io.crashbox.passage"
+
+  /** Shown in the launcher and in the autofill settings. */
+  def appLabel: String
+
+  // the label differs between variants, so it comes from a generated resource
+  def appLabelResources = Task {
+    os.write(
+      Task.dest / "values" / "app_label.xml",
+      s"""<resources><string name="app_label">${appLabel}</string></resources>\n""",
+      createFolders = true,
+    )
+    PathRef(Task.dest)
+  }
+  override def androidResources = Task { super.androidResources() :+ appLabelResources() }
+
+  /**
+   * From the last `v<major>.<minor>.<patch>` git tag: `0.1.0` on the tag,
+   * `0.1.0-3-gabc1234` three commits later, with `-dirty` for uncommitted
+   * changes. The version code (which must increase with every release)
+   * is major * 1000000 + minor * 1000 + patch.
+   */
+  def gitVersion = Task.Input {
+    val described = os.proc("git", "describe", "--tags", "--match", "v[0-9]*", "--dirty")
+      .call(cwd = mill.api.BuildCtx.workspaceRoot, check = false, stderr = os.Pipe)
+    if (described.exitCode == 0) described.out.trim().stripPrefix("v") else "0.0.0-dev"
+  }
+  def androidVersionName = Task { gitVersion() }
+  def androidVersionCode = Task {
+    val Array(major, minor, patch) = gitVersion().takeWhile(c => c.isDigit || c == '.').split('.').map(_.toInt)
+    math.max(1, major * 1000000 + minor * 1000 + patch)
+  }
 
   def moduleDeps = Seq(core)
 
@@ -106,4 +136,62 @@ object app extends AndroidAppKotlinModule {
     mvn"androidx.lifecycle:lifecycle-process:2.8.7",
     mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7"
   )
+}
+
+/** For development: debuggable, signed with mill's debug key, installable next to the release. */
+object app extends PassageApp {
+  def androidIsDebug = true
+  def androidApplicationId = "io.crashbox.passage.debug"
+  def appLabel = "Passage (debug)"
+}
+
+/**
+ * The release: not debuggable, and signed with the release key, which is
+ * read from the output of the command in `PASSAGE_SIGNING_KEY_COMMAND` (a
+ * PKCS#8 private key, PEM or DER), so that it is never written to disk. Its
+ * certificate is `signing/release-cert.pem`. See `signing/README.md`.
+ */
+object release extends PassageApp {
+  override def moduleDir = app.moduleDir
+  def androidIsDebug = false
+  def androidApplicationId = "io.crashbox.passage"
+  def appLabel = "Passage"
+
+  def signingCertificate = Task.Source(mill.api.BuildCtx.workspaceRoot / "signing" / "release-cert.pem")
+
+  override def androidApk = Task {
+    val command = Task.env.getOrElse(
+      "PASSAGE_SIGNING_KEY_COMMAND",
+      throw new Exception("PASSAGE_SIGNING_KEY_COMMAND must be a command printing the release signing key, see signing/README.md")
+    )
+    val output = os.proc("sh", "-c", command).call(stdin = os.Inherit, stderr = os.Inherit).out.bytes
+    val key = pkcs8Der(output)
+    java.util.Arrays.fill(output, 0.toByte)
+    val signed = Task.dest / "app.apk"
+    try {
+      // the key is passed on standard input, not as a file
+      os.proc(
+        androidSdkModule().apksignerExe().path,
+        "sign",
+        "--in", androidAlignedUnsignedApk().path,
+        "--out", signed,
+        "--key", "/dev/stdin",
+        "--cert", signingCertificate().path,
+      ).call(stdin = key, stderr = os.Pipe)
+    } finally java.util.Arrays.fill(key, 0.toByte)
+    PathRef(signed)
+  }
+
+  /** An unencrypted PKCS#8 private key, as DER, from PEM or DER input. */
+  private def pkcs8Der(bytes: Array[Byte]): Array[Byte] = {
+    val text = new String(bytes, java.nio.charset.StandardCharsets.US_ASCII)
+    if (!text.startsWith("-----BEGIN")) bytes
+    else {
+      val pem = """(?s)-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----""".r
+      val body = pem.findFirstMatchIn(text).getOrElse(
+        throw new Exception("the signing key must be an unencrypted PKCS#8 key (-----BEGIN PRIVATE KEY-----)")
+      ).group(1)
+      java.util.Base64.getMimeDecoder.decode(body)
+    }
+  }
 }
