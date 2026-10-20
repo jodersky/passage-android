@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A doorway (a passage) with a keyhole, and a path leading out of it. Source: logo.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#2E7D74" android:pathData="M38,82 L70,82 L92,108 L16,108 Z" />
+    <path android:fillColor="#F2F5F3" android:pathData="M36,82 L36,46 A18,18 0 0 1 72,46 L72,82 Z" />
+    <path android:fillColor="#12494F" android:pathData="M51.2,52.87 A6.5,6.5 0 1 1 56.8,52.87 L58.5,69 L49.5,69 Z" />
+</vector>

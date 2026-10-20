@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- Passage logo: a doorway (a passage) with a keyhole, and a path leading out of it.
+       The app icon (app/src/main/res/drawable/ic_launcher_*.xml) uses the same paths. -->
+  <defs><clipPath id="c"><circle cx="54" cy="54" r="54"/></clipPath></defs>
+  <g clip-path="url(#c)">
+    <rect width="108" height="108" fill="#12494F"/>
+    <path fill="#2E7D74" d="M38,82 L70,82 L92,108 L16,108 Z"/>
+    <path fill="#F2F5F3" d="M36,82 L36,46 A18,18 0 0 1 72,46 L72,82 Z"/>
+    <path fill="#12494F" d="M51.2,52.87 A6.5,6.5 0 1 1 56.8,52.87 L58.5,69 L49.5,69 Z"/>
+  </g>
+</svg>
