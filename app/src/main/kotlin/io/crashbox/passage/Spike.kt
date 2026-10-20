@@ -16,6 +16,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.channels.Channels
+import net.schmizz.sshj.SSHClient
+import net.schmizz.sshj.common.SecurityUtils
+import net.schmizz.sshj.transport.verification.PromiscuousVerifier
+import net.schmizz.sshj.userauth.keyprovider.KeyPairWrapper
 
 /**
  * Feasibility checks for the hardware-backed age identity (see plan.md, first
@@ -86,6 +90,33 @@ object Spike {
       }
     } else {
       results += Check("Desktop file", false, "not found: ${desktopFile.path}")
+    }
+
+    // Without this, sshj routes all JCA calls to BouncyCastle, which cannot
+    // sign with a Keystore key. With no explicit provider, the JCA picks the
+    // AndroidKeyStore provider for Keystore keys.
+    SecurityUtils.setRegisterBouncyCastle(false)
+    val sshKey by lazy { SshKeystore.getOrCreate() }
+
+    check("SSH key") {
+      val authorizedKey = SshKeystore.authorizedKey(sshKey)
+      File(dir, "ssh.pub").writeText("$authorizedKey\n")
+      "security level: ${SshKeystore.securityLevel()}, $authorizedKey"
+    }
+
+    check("SSH login (127.0.0.1:2222, needs testserver + adb reverse)") {
+      SSHClient().use { ssh ->
+        ssh.addHostKeyVerifier(PromiscuousVerifier()) // spike only: no host key check
+        ssh.connectTimeout = 5000
+        ssh.connect("127.0.0.1", 2222)
+        ssh.authPublickey("git", KeyPairWrapper(sshKey))
+        ssh.startSession().use { session ->
+          val cmd = session.exec("git-upload-pack '/passage.git'")
+          val out = cmd.inputStream.readBytes().decodeToString()
+          cmd.join()
+          out.trim()
+        }
+      }
     }
 
     return results

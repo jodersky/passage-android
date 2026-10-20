@@ -96,7 +96,15 @@ Prove the riskiest parts before building any UI:
 
 ### Results (2026-10-20, Pixel 9a)
 
-Steps 1-4 succeeded:
+All steps succeeded.
+
+Step 5: sshj logs in to an SSH server (`mill testserver.run`, reached over
+`adb reverse tcp:2222 tcp:2222`) with a StrongBox ECDSA P-256 key, using
+sshj's stock `KeyPairWrapper`. This requires
+`SecurityUtils.setRegisterBouncyCastle(false)`: otherwise sshj sends all JCA
+calls to BouncyCastle, which cannot sign with a Keystore key.
+
+Steps 1-4:
 - the key reports security level StrongBox
 - a file encrypted by `age` 1.3.2 to the phone's recipient (plus an X25519
   recipient) decrypts on the phone, in ~60-120 ms per file
@@ -112,4 +120,7 @@ Learned:
 - `mill app.androidInstall` only targets the emulator; use
   `adb install -r out/app/androidApk.dest/app.apk` for a real device.
 - coursier ignores Gradle module metadata, so some AndroidX artifacts must be
-  pinned in `build.mill` to avoid duplicate classes in d8.
+  pinned in `build.mill` to avoid duplicate classes in d8. The same applies
+  to BouncyCastle: all its jars must have the same version.
+- the spike accepts any SSH host key. The real app needs host key
+  verification (trust on first use, with a known_hosts file).

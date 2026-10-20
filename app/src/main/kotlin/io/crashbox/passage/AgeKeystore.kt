@@ -36,16 +36,18 @@ object AgeKeystore {
     }
   }
 
-  /** Where the key actually lives, as reported by Keystore. */
-  fun securityLevel(): String {
-    val entry = keyStore().getEntry(ALIAS, null) as KeyStore.PrivateKeyEntry
-    val info = KeyFactory.getInstance(entry.privateKey.algorithm, PROVIDER)
-      .getKeySpec(entry.privateKey, KeyInfo::class.java)
-    return when (info.securityLevel) {
-      KeyProperties.SECURITY_LEVEL_STRONGBOX -> "StrongBox"
-      KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "TEE"
-      KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
-      else -> "unknown (${info.securityLevel})"
-    }
+  fun securityLevel(): String = keystoreSecurityLevel(ALIAS)
+}
+
+/** Where a Keystore key actually lives, as reported by Keystore. */
+fun keystoreSecurityLevel(alias: String): String {
+  val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+  val key = (ks.getEntry(alias, null) as KeyStore.PrivateKeyEntry).privateKey
+  val info = KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java)
+  return when (info.securityLevel) {
+    KeyProperties.SECURITY_LEVEL_STRONGBOX -> "StrongBox"
+    KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "TEE"
+    KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
+    else -> "unknown (${info.securityLevel})"
   }
 }
