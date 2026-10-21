@@ -38,7 +38,8 @@ class SshjSessionFactory(
       val timeout = if (tms > 0) tms * 1000 else DEFAULT_TIMEOUT_MS
       client.connectTimeout = timeout
       client.timeout = timeout
-      client.connect(uri.host, if (uri.port > 0) uri.port else 22)
+      // jgit keeps the brackets of IPv6 literals ([fd00::1])
+      client.connect(uri.host.removeSurrounding("[", "]"), if (uri.port > 0) uri.port else 22)
       client.authPublickey(uri.user ?: "git", KeyPairWrapper(keyPair()))
       return SshjSession(client)
     } catch (e: Exception) {

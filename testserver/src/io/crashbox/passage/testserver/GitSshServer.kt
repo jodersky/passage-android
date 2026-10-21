@@ -33,9 +33,11 @@ class GitSshServer(
   hostKey: Path,
   port: Int = 0,
   private val log: (String) -> Unit = {},
+  /** the address to listen on */
+  host: String = "127.0.0.1",
 ) : AutoCloseable {
   private val server: SshServer = SshServer.setUpDefaultServer().apply {
-    host = "127.0.0.1"
+    this.host = host
     this.port = port
     keyPairProvider = SimpleGeneratorHostKeyProvider(hostKey).apply {
       algorithm = "EC"
