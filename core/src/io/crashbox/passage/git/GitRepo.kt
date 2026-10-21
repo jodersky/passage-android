@@ -59,7 +59,7 @@ class GitRepo(val dir: File, sessions: SshjSessionFactory) {
 
   fun clone(url: String) {
     Git.cloneRepository()
-      .setURI(normalizeUrl(url))
+      .setURI(url)
       .setDirectory(dir)
       .setTransportConfigCallback(transport)
       .call()
@@ -251,26 +251,6 @@ class GitRepo(val dir: File, sessions: SshjSessionFactory) {
 private val RebaseResult.Status.isSuccessful: Boolean
   get() = this == RebaseResult.Status.OK || this == RebaseResult.Status.FAST_FORWARD ||
     this == RebaseResult.Status.UP_TO_DATE || this == RebaseResult.Status.NOTHING_TO_COMMIT
-
-/**
- * Rewrites scp-like URLs with an IPv6 literal, which jgit cannot parse
- * (`git@[fd00::1]:~/git/x.git`), to the equivalent ssh URL
- * (`ssh://git@[fd00::1]/~/git/x.git`). Like with git, scp-like paths are
- * relative to the home directory unless they are absolute. Other URLs are
- * returned unchanged.
- */
-fun normalizeUrl(url: String): String {
-  val match = SCP_IPV6.matchEntire(url.trim()) ?: return url
-  val (user, host, path) = match.destructured
-  val sshPath = when {
-    path.startsWith("/") -> path
-    path.startsWith("~") -> "/$path"
-    else -> "/~/$path"
-  }
-  return "ssh://$user[$host]$sshPath"
-}
-
-private val SCP_IPV6 = Regex("""([^@/\[]+@)?\[([0-9A-Fa-f:.%a-zA-Z]+)\]:(?!//)(.+)""")
 
 /** The host key exception in [e]'s cause chain, if a connection failed because of the server's host key. */
 fun hostKeyProblem(e: Throwable): Exception? =

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import io.crashbox.passage.age.NoMatchingStanzaException
 import io.crashbox.passage.git.Divergence
+import io.crashbox.passage.git.Ed25519Provider
 import io.crashbox.passage.git.GitRepo
 import io.crashbox.passage.git.KnownHosts
 import io.crashbox.passage.git.Resolution
@@ -23,6 +24,8 @@ class App : Application() {
     // sshj would otherwise route all JCA calls to BouncyCastle, which cannot
     // sign with Keystore keys
     SecurityUtils.setRegisterBouncyCastle(false)
+    // ...but Ed25519 host keys need BouncyCastle's Ed25519
+    Ed25519Provider.install()
     // jgit looks for configuration files in the home directory
     System.setProperty("user.home", filesDir.path)
   }

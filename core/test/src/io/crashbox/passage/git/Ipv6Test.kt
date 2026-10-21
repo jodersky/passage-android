@@ -10,26 +10,12 @@ import org.eclipse.jgit.transport.URIish
 
 class Ipv6Test {
   @Test
-  fun normalizesScpLikeIpv6Urls() {
-    assertEquals("ssh://git@[fd00::1]/~/git/passage.git", normalizeUrl("git@[fd00::1]:~/git/passage.git"))
-    assertEquals("ssh://git@[fd00::1]/~/git/passage.git", normalizeUrl("git@[fd00::1]:git/passage.git"))
-    assertEquals("ssh://git@[fd00::1]/srv/git/passage.git", normalizeUrl("git@[fd00::1]:/srv/git/passage.git"))
-    assertEquals("ssh://[fe80::1%wlan0]/~/x.git", normalizeUrl("[fe80::1%wlan0]:x.git"))
-    // left alone
-    for (url in listOf(
-      "git@github.com:me/passage.git",
-      "ssh://git@[fd00::1]:2222/srv/passage.git",
-      "ssh://git@[fd00::1]/~/git/passage.git",
-      "https://example.com/x.git",
-    )) assertEquals(url, normalizeUrl(url))
-  }
-
-  @Test
-  fun jgitParsesNormalizedUrls() {
-    val uri = URIish(normalizeUrl("git@[fd00::1]:~/git/passage.git"))
-    assertEquals("git", uri.user)
-    assertEquals("[fd00::1]", uri.host)
-    assertEquals("~/git/passage.git", uri.path) // home-relative, like the scp-like form
+  fun jgitKeepsBracketsAroundIpv6Hosts() {
+    // which is why the session factory strips them before connecting
+    val uri = URIish("ssh://jodersky@[fd42:aa00:4320:2000:4::1]:2223/~/git/passage.git")
+    assertEquals("[fd42:aa00:4320:2000:4::1]", uri.host)
+    assertEquals(2223, uri.port)
+    assertEquals("~/git/passage.git", uri.path)
   }
 
   private val f = GitFixture(host = "::1")

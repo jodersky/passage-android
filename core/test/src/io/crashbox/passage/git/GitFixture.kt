@@ -12,7 +12,7 @@ import org.eclipse.jgit.transport.RefSpec
 import org.eclipse.jgit.treewalk.TreeWalk
 
 /** A git server over SSH with one repository, and helpers to inspect and change it directly. */
-class GitFixture(host: String = "127.0.0.1") : AutoCloseable {
+class GitFixture(host: String = "127.0.0.1", hostKeyAlgorithm: String = "EC") : AutoCloseable {
   val tmp: File = Files.createTempDirectory("passage-git-test").toFile()
   val bare = File(tmp, "repos/passage.git")
   val clientKey = ecKeyPair()
@@ -23,6 +23,7 @@ class GitFixture(host: String = "127.0.0.1") : AutoCloseable {
     authorizedKeys = { listOf(clientKey.public) },
     hostKey = File(tmp, "hostkey").toPath(),
     host = host,
+    hostKeyAlgorithm = hostKeyAlgorithm,
   ).start()
 
   /** the host as written in URLs: IPv6 literals in brackets */

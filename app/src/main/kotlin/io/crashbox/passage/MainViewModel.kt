@@ -1,7 +1,9 @@
 package io.crashbox.passage
 
+import android.Manifest
 import android.app.Activity
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -75,7 +77,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
    * with its result on the main thread. For remote operations, asks the user
    * about unknown host keys and retries.
    */
-  private fun <T> run(label: String, onSuccess: (T) -> Unit = {}, op: () -> T) {
+  private fun <T> run(label: String, remote: Boolean = false, onSuccess: (T) -> Unit = {}, op: () -> T) {
     if (busy != null) return
     busy = label
     viewModelScope.launch {
@@ -87,18 +89,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
           is UnknownHostKeyException -> hostKeyQuestion = HostKeyQuestion(problem.hostKey) {
             hostKeyQuestion = null
             passage.knownHosts.trust(problem.hostKey)
-            run(label, onSuccess, op)
+            run(label, remote, onSuccess, op)
           }
           is HostKeyChangedException -> error =
             "The host key of ${problem.hostKey.host} has CHANGED to ${problem.hostKey.type} " +
               "${problem.hostKey.fingerprint}. Someone could be intercepting the connection. Not connecting."
-          else -> error = describe(e)
+          else -> error = describe(e) + if (remote && !hasLocalNetworkAccess()) LOCAL_NETWORK_HINT else ""
         }
       }
     }
   }
 
-  fun clone(url: String) = run("Cloning…", onSuccess = { screen = Screen.Entries }) { passage.clone(url) }
+  private fun hasLocalNetworkAccess() =
+    getApplication<Application>().checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
+
+  fun clone(url: String) = run("Cloning…", remote = true, onSuccess = { screen = Screen.Entries }) { passage.clone(url) }
 
   /**
    * Fetches and integrates remote changes, then pushes. Stops when changes
@@ -106,6 +111,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
    */
   fun sync(activity: Activity) = run(
     "Syncing…",
+    remote = true,
     onSuccess = { found: List<Conflict> ->
       conflicts = found
       if (found.isEmpty()) push(activity) else screen = Screen.Conflicts
@@ -140,6 +146,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   /** Re-encrypts entries whose recipients changed, then pushes. Without re-encrypting all of them, nothing is pushed. */
   private fun push(activity: Activity) = run(
     "Pushing…",
+    remote = true,
     onSuccess = { skipped: List<String> ->
       notice = if (skipped.isEmpty()) "Synced"
       else "Synced. Could not re-encrypt ${skipped.joinToString()}: this phone cannot read them."
@@ -175,6 +182,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     notice = "Deleted $name"
   }) { passage.delete(name) }
 }
+
+private const val LOCAL_NETWORK_HINT =
+  "\n\nIf the server is on your local network, allow Passage to access \"Nearby devices\" in the app's permissions."
 
 /** A message for the user: the most specific one in the cause chain. */
 fun describe(e: Throwable): String =

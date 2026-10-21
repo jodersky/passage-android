@@ -1,18 +1,22 @@
 package io.crashbox.passage
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.view.WindowManager
 import android.view.autofill.AutofillManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -152,6 +156,30 @@ fun PassageUi(vm: MainViewModel) {
   }
 }
 
+/**
+ * Returns a function running an action that may connect to the git server,
+ * after asking for the local network permission (Android 17+) if it was not
+ * granted yet. The action runs either way: servers on the internet do not
+ * need the permission.
+ */
+@Composable
+private fun rememberWithLocalNetwork(): (() -> Unit) -> Unit {
+  val context = LocalContext.current
+  var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
+  val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+    pending?.invoke()
+    pending = null
+  }
+  return { action ->
+    if (context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED) {
+      action()
+    } else {
+      pending = action
+      launcher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+    }
+  }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Page(
@@ -187,6 +215,7 @@ private fun Page(
 @Composable
 private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val activity = LocalContext.current as ComponentActivity
+  val withLocalNetwork = rememberWithLocalNetwork()
   var query by rememberSaveable { mutableStateOf("") }
   val shown = vm.entries.filter { it.contains(query.trim(), ignoreCase = true) }
   Page(
@@ -194,7 +223,7 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
     vm,
     snackbar,
     actions = {
-      IconButton(onClick = { vm.sync(activity) }, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
+      IconButton(onClick = { withLocalNetwork { vm.sync(activity) } }, enabled = vm.busy == null) { Icon(Icons.Default.Refresh, "Sync") }
       IconButton(onClick = { vm.screen = Screen.Settings }) { Icon(Icons.Default.Settings, "Settings") }
     },
     fab = {
@@ -273,6 +302,7 @@ private fun Conflict.description(): String =
 @Composable
 private fun ConflictsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val activity = LocalContext.current as ComponentActivity
+  val withLocalNetwork = rememberWithLocalNetwork()
   var choices by remember { mutableStateOf(mapOf<String, Resolution>()) }
   val complete = vm.conflicts.all { it.path in choices }
 
@@ -283,7 +313,10 @@ private fun ConflictsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
     onBack = { vm.screen = Screen.Entries },
     actions = {
       TextButton(
-        onClick = { vm.resolve(activity, choices.filterKeys { p -> vm.conflicts.any { it.path == p } }) },
+        onClick = {
+          val resolutions = choices.filterKeys { p -> vm.conflicts.any { it.path == p } }
+          withLocalNetwork { vm.resolve(activity, resolutions) }
+        },
         enabled = complete && vm.busy == null,
       ) { Text("Resolve") }
     },
@@ -535,6 +568,7 @@ private fun copySecret(context: Context, secret: String) {
 @Composable
 private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val context = LocalContext.current
+  val withLocalNetwork = rememberWithLocalNetwork()
   val hasRepo = vm.passage.repo.exists()
   var url by rememberSaveable { mutableStateOf(vm.passage.remoteUrl ?: "") }
   var fallbackUsername by rememberSaveable { mutableStateOf(vm.passage.fallbackUsername) }
@@ -592,7 +626,7 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
         value = url,
         onValueChange = { url = it },
         label = { Text("URL") },
-        placeholder = { Text("git@github.com:me/passwords.git") },
+        placeholder = { Text("ssh://git@example.com:22/~/passwords.git") },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
@@ -603,7 +637,7 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
           style = MaterialTheme.typography.bodySmall,
         )
       }
-      Button(onClick = { vm.clone(url.trim()) }, enabled = url.isNotBlank() && vm.busy == null) {
+      Button(onClick = { withLocalNetwork { vm.clone(url.trim()) } }, enabled = url.isNotBlank() && vm.busy == null) {
         Text(if (hasRepo) "Clone again" else "Clone")
       }
       vm.busy?.let { Text(it) }
