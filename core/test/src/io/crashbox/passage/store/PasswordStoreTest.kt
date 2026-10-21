@@ -120,13 +120,35 @@ class PasswordStoreTest {
 
   @Test
   fun entryContent() {
-    assertEquals("pw\n", EntryContent.of("pw", "  \n"))
-    assertEquals("pw\nuser: me\nurl: x\n", EntryContent.of("pw", "user: me\nurl: x\n\n"))
-    val content = "pw\nuser: me\n"
-    assertEquals("pw", EntryContent.password(content))
-    assertEquals("user: me", EntryContent.notes(content))
-    assertEquals("", EntryContent.notes("pw"))
-    assertFailsWith<IllegalArgumentException> { EntryContent.of("a\nb", "") }
+    fun roundTrip(content: String, password: String, notes: String, otp: String?) {
+      val parsed = EntryContent.parse(content)
+      assertEquals(password, parsed.password, content)
+      assertEquals(notes, parsed.notes, content)
+      assertEquals(otp, parsed.otp, content)
+      assertEquals(content, parsed.toString(), content)
+    }
+    val otp = "otpauth://totp/x?secret=GEZDGNBV"
+    roundTrip("pw\n", "pw", "", null)
+    roundTrip("pw\nuser: me\nurl: x\n", "pw", "user: me\nurl: x", null)
+    roundTrip("$otp\n", "", "", otp) // pass-otp entry
+    roundTrip("$otp\nuser: me\n", "", "user: me", otp)
+    roundTrip("pw\nuser: me\n$otp\n", "pw", "user: me", otp)
+
+    // anywhere in the notes, normalized to the end
+    val middle = EntryContent.parse("pw\nuser: me\n$otp\nurl: x")
+    assertEquals("user: me\nurl: x", middle.notes)
+    assertEquals(otp, middle.otp)
+    assertEquals("pw\nuser: me\nurl: x\n$otp\n", middle.toString())
+
+    // only the first one is the one-time password
+    val two = EntryContent.parse("pw\n$otp\n$otp&issuer=other")
+    assertEquals(otp, two.otp)
+    assertEquals("$otp&issuer=other", two.notes)
+
+    assertEquals("pw\n", EntryContent("pw", "  \n", null).toString())
+    assertFailsWith<IllegalArgumentException> { EntryContent("a\nb", "", null) }
+    assertFailsWith<IllegalArgumentException> { EntryContent(otp, "", null) }
+    assertFailsWith<IllegalArgumentException> { EntryContent("pw", "", "https://x") }
   }
 
   @Test
