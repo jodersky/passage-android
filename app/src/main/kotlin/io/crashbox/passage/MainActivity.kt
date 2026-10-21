@@ -423,16 +423,23 @@ private fun EntryScreen(vm: MainViewModel, snackbar: SnackbarHostState, name: St
           Button(onClick = { attempt++ }) { Text("Try again") }
         }
         is Decryption.Done -> {
-          val password = EntryContent.password(s.content)
-          val notes = EntryContent.notes(s.content)
-          Text(
-            if (revealed) password else "••••••••••••",
-            style = MaterialTheme.typography.headlineSmall,
-            fontFamily = FontFamily.Monospace,
-          )
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { copySecret(activity, password) }) { Text("Copy") }
-            OutlinedButton(onClick = { revealed = !revealed }) { Text(if (revealed) "Hide" else "Show") }
+          val entry = EntryContent.parse(s.content)
+          val password = entry.password
+          val notes = entry.notes
+          if (password.isNotEmpty()) {
+            Text(
+              if (revealed) password else "••••••••••••",
+              style = MaterialTheme.typography.headlineSmall,
+              fontFamily = FontFamily.Monospace,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Button(onClick = { copySecret(activity, password) }) { Text("Copy") }
+              OutlinedButton(onClick = { revealed = !revealed }) { Text(if (revealed) "Hide" else "Show") }
+            }
+          }
+          entry.otp?.let { otp ->
+            if (password.isNotEmpty()) HorizontalDivider()
+            OtpCode(otp, onCopy = { copySecret(activity, it) })
           }
           if (notes.isNotEmpty()) {
             HorizontalDivider()
@@ -463,16 +470,31 @@ private fun EntryScreen(vm: MainViewModel, snackbar: SnackbarHostState, name: St
 private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor: Screen.Editor) {
   val isNew = editor.name == null
   // not rememberSaveable: the content must not end up in saved instance state
+  val initial = remember { EntryContent.parse(editor.content) }
   var name by remember { mutableStateOf(editor.name ?: "") }
-  var password by remember { mutableStateOf(EntryContent.password(editor.content)) }
-  var notes by remember { mutableStateOf(EntryContent.notes(editor.content)) }
+  var password by remember { mutableStateOf(initial.password) }
+  var notes by remember { mutableStateOf(initial.notes) }
+  var otp by remember { mutableStateOf(initial.otp ?: "") }
   var revealed by remember { mutableStateOf(isNew) }
+  var otpRevealed by remember { mutableStateOf(false) }
+  var scanning by remember { mutableStateOf(false) }
   var confirmDiscard by remember { mutableStateOf(false) }
 
-  val dirty = name != (editor.name ?: "") ||
-    password != EntryContent.password(editor.content) ||
-    notes != EntryContent.notes(editor.content)
+  val dirty = name != (editor.name ?: "") || password != initial.password || notes != initial.notes || otp != (initial.otp ?: "")
   val nameValid = PasswordStore.isValidName(name)
+  val otpResult = otp.trim().takeIf { it.isNotEmpty() }?.let { runCatching { io.crashbox.passage.otp.Totp.parse(it) } }
+  val otpValid = otpResult?.isSuccess ?: true
+
+  if (scanning) {
+    QrScanner(
+      onResult = {
+        scanning = false
+        otp = it.trim()
+      },
+      onCancel = { scanning = false },
+    )
+    return
+  }
   val back = { if (dirty) confirmDiscard = true else vm.screen = if (isNew) Screen.Entries else Screen.Entry(editor.name!!) }
   BackHandler(onBack = back)
 
@@ -483,8 +505,12 @@ private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor:
     onBack = back,
     actions = {
       TextButton(
-        onClick = { vm.save(editor.name, name.trim(), EntryContent.of(password, notes)) },
-        enabled = nameValid && password.isNotEmpty() && vm.busy == null,
+        onClick = {
+          val content = EntryContent(password, notes, otp.trim().ifEmpty { null })
+          vm.save(editor.name, name.trim(), content.toString())
+        },
+        // an entry needs a password, a one-time password, or both
+        enabled = nameValid && otpValid && (password.isNotEmpty() || otp.isNotBlank()) && vm.busy == null,
       ) { Text("Save") }
     },
   ) { modifier ->
@@ -534,8 +560,33 @@ private fun EditorScreen(vm: MainViewModel, snackbar: SnackbarHostState, editor:
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
       )
+      Text("One-time password (TOTP)", style = MaterialTheme.typography.titleSmall)
+      OutlinedTextField(
+        value = otp,
+        onValueChange = { otp = it.trim() },
+        label = { Text("otpauth:// URL") },
+        placeholder = { Text("otpauth://totp/…?secret=…") },
+        singleLine = true,
+        isError = !otpValid,
+        supportingText = {
+          when {
+            otpResult == null -> Text("Paste the URL, or scan the QR code shown when setting up two-factor authentication")
+            otpResult.isFailure -> Text(otpResult.exceptionOrNull()?.message ?: "invalid")
+            else -> Text(otpResult.getOrThrow().label)
+          }
+        },
+        visualTransformation = if (otpRevealed) VisualTransformation.None else PasswordVisualTransformation(),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        trailingIcon = { TextButton(onClick = { otpRevealed = !otpRevealed }) { Text(if (otpRevealed) "Hide" else "Show") } },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { scanning = true }) { Text("Scan QR code") }
+        if (otp.isNotEmpty()) OutlinedButton(onClick = { otp = "" }) { Text("Remove") }
+      }
       Text(
-        "The entry is encrypted to the recipients in the nearest .age-recipients file, then committed and pushed.",
+        "The entry is encrypted to the recipients in the nearest .age-recipients file and committed. Sync to push it.",
         style = MaterialTheme.typography.bodySmall,
       )
     }

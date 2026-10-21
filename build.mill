@@ -128,13 +128,24 @@ trait PassageApp extends AndroidAppKotlinModule {
     mvn"androidx.compose.ui:ui:1.7.6",
     mvn"androidx.lifecycle:lifecycle-runtime-compose:2.8.7",
     mvn"androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7",
+    // QR code scanning (one-time passwords)
+    mvn"androidx.camera:camera-camera2:1.6.2",
+    mvn"androidx.camera:camera-lifecycle:1.6.2",
+    mvn"androidx.camera:camera-view:1.6.2",
+    mvn"com.google.zxing:core:3.5.4",
     // coursier ignores Gradle module metadata version constraints, so these
     // transitive artifacts must be pinned to avoid duplicate classes in d8
     mvn"androidx.collection:collection-jvm:1.4.4",
     mvn"androidx.collection:collection-ktx:1.4.4",
     mvn"androidx.lifecycle:lifecycle-common:2.8.7",
     mvn"androidx.lifecycle:lifecycle-process:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7"
+    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7",
+    mvn"androidx.lifecycle:lifecycle-livedata:2.8.7",
+    mvn"androidx.lifecycle:lifecycle-livedata-core:2.8.7",
+    mvn"androidx.arch.core:core-common:2.2.0",
+    mvn"androidx.arch.core:core-runtime:2.2.0",
+    // tracing-ktx was merged into tracing in 1.3.0 (brought by CameraX)
+    mvn"androidx.tracing:tracing-ktx:1.3.0"
   )
 }
 

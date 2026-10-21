@@ -88,14 +88,16 @@ class AutofillActivity : ComponentActivity() {
           dataset.setField(usernameId, Field.Builder().setValue(AutofillValue.forText(username)).build())
           any = true
         }
-        if (passwordId != null) {
-          dataset.setField(passwordId, Field.Builder().setValue(AutofillValue.forText(EntryContent.password(content))).build())
+        // entries with only a one-time password have no password to fill
+        val password = EntryContent.parse(content).password
+        if (passwordId != null && password.isNotEmpty()) {
+          dataset.setField(passwordId, Field.Builder().setValue(AutofillValue.forText(password)).build())
           any = true
         }
         if (any) {
           setResult(Activity.RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset.build()))
         } else {
-          Toast.makeText(this@AutofillActivity, "$name has no username to fill", Toast.LENGTH_LONG).show()
+          Toast.makeText(this@AutofillActivity, "$name has nothing to fill here", Toast.LENGTH_LONG).show()
         }
       } catch (e: Exception) {
         Toast.makeText(this@AutofillActivity, describe(e), Toast.LENGTH_LONG).show()
