@@ -67,20 +67,26 @@ class Passage(context: Context) {
     remoteUrl = url
   }
 
-  var authorName: String
-    get() = prefs.getString("author_name", null) ?: "Passage"
-    set(value) = prefs.edit().putString("author_name", value).apply()
+  /**
+   * This phone's name, as a host name: the device name from the system
+   * settings (falling back to the model), e.g. "Jakob's Pixel 9a" ->
+   * "jakobs-pixel-9a".
+   */
+  val deviceName: String = run {
+    val name = android.provider.Settings.Global.getString(context.contentResolver, android.provider.Settings.Global.DEVICE_NAME)
+      ?.takeIf { it.isNotBlank() } ?: android.os.Build.MODEL
+    name.lowercase().replace(Regex("['’]"), "").replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "android" }
+  }
 
-  var authorEmail: String
-    get() = prefs.getString("author_email", null) ?: "passage@android"
-    set(value) = prefs.edit().putString("author_email", value).apply()
+  /** Identifies this phone: the commit author, and the SSH public key's comment. */
+  val identity: String get() = "passage-android@$deviceName"
 
   /** Filled as username by autofill for entries without a username line. */
   var fallbackUsername: String
     get() = prefs.getString("fallback_username", null) ?: ""
     set(value) = prefs.edit().putString("fallback_username", value).apply()
 
-  private fun author() = PersonIdent(authorName, authorEmail)
+  private fun author() = PersonIdent("Passage Android", identity)
 
   /**
    * Encrypts and commits an entry (but does not push).

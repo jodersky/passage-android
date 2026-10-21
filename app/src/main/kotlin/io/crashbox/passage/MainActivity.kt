@@ -537,8 +537,6 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val context = LocalContext.current
   val hasRepo = vm.passage.repo.exists()
   var url by rememberSaveable { mutableStateOf(vm.passage.remoteUrl ?: "") }
-  var authorName by rememberSaveable { mutableStateOf(vm.passage.authorName) }
-  var authorEmail by rememberSaveable { mutableStateOf(vm.passage.authorEmail) }
   var fallbackUsername by rememberSaveable { mutableStateOf(vm.passage.fallbackUsername) }
   // re-checked when coming back from the system settings
   val autofillManager = context.getSystemService(AutofillManager::class.java)
@@ -553,7 +551,7 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
     keys = withContext(Dispatchers.IO) {
       listOf(
         Triple("age recipient", Keys.ageRecipient.toString(), Keys.ageSecurityLevel),
-        Triple("SSH public key", Keys.sshPublicKey, Keys.sshSecurityLevel),
+        Triple("SSH public key", Keys.sshPublicKey(vm.passage.identity), Keys.sshSecurityLevel),
       )
     }
   }
@@ -571,20 +569,21 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
       )
       val k = keys
       if (k == null) CircularProgressIndicator()
-      else for ((label, value, level) in k) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          Text("$label ($level)", style = MaterialTheme.typography.labelLarge)
-          SelectionContainer { Text(value, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
-              context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, value))
-            }) { Text("Copy") }
-            OutlinedButton(onClick = {
-              val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, value)
-              context.startActivity(Intent.createChooser(send, label))
-            }) { Text("Share") }
+      else {
+        for ((label, value, level) in k) {
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("$label ($level)", style = MaterialTheme.typography.labelLarge)
+            SelectionContainer { Text(value, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
           }
         }
+        OutlinedButton(onClick = {
+          val text = k.joinToString("\n\n") { (label, value, _) -> "$label:\n$value" } + "\n"
+          val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "Passage keys of ${vm.passage.deviceName}")
+            .putExtra(Intent.EXTRA_TEXT, text)
+          context.startActivity(Intent.createChooser(send, "Share keys"))
+        }) { Text("Share keys") }
       }
 
       HorizontalDivider()
@@ -630,24 +629,6 @@ private fun SettingsScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
         onValueChange = { fallbackUsername = it; vm.passage.fallbackUsername = it.trim() },
         label = { Text("Fallback username") },
         supportingText = { Text("Filled for entries without a user:, username:, login: or email: line") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
-        modifier = Modifier.fillMaxWidth(),
-      )
-
-      HorizontalDivider()
-      Text("Commit author", style = MaterialTheme.typography.titleMedium)
-      OutlinedTextField(
-        value = authorName,
-        onValueChange = { authorName = it; vm.passage.authorName = it.trim() },
-        label = { Text("Name") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-      )
-      OutlinedTextField(
-        value = authorEmail,
-        onValueChange = { authorEmail = it; vm.passage.authorEmail = it.trim() },
-        label = { Text("Email") },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),

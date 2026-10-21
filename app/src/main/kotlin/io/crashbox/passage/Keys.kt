@@ -73,12 +73,11 @@ object Keys {
   fun sshKeyPair(): KeyPair = entry(SSH_ALIAS).let { KeyPair(it.certificate.publicKey, it.privateKey) }
 
   /** The SSH public key, in authorized_keys format. */
-  val sshPublicKey: String
-    get() {
-      val key = entry(SSH_ALIAS).certificate.publicKey
-      val blob = Buffer.PlainBuffer().putPublicKey(key).compactData
-      return "${KeyType.fromKey(key)} ${Base64.getEncoder().encodeToString(blob)} passage"
-    }
+  fun sshPublicKey(comment: String): String {
+    val key = entry(SSH_ALIAS).certificate.publicKey
+    val blob = Buffer.PlainBuffer().putPublicKey(key).compactData
+    return "${KeyType.fromKey(key)} ${Base64.getEncoder().encodeToString(blob)} $comment"
+  }
 
   val ageSecurityLevel: String get() = securityLevel(AGE_ALIAS)
   val sshSecurityLevel: String get() = securityLevel(SSH_ALIAS)
