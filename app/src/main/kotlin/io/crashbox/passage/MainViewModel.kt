@@ -51,6 +51,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   /** what is running in the background, if anything */
   var busy: String? by mutableStateOf(null)
     private set
+  /** whether a sync runs, in any of its steps */
+  val syncing: Boolean get() = busy == SYNCING || busy == PUSHING
   var error: String? by mutableStateOf(null)
   /** a short message for the user */
   var notice: String? by mutableStateOf(null)
@@ -110,7 +112,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
    * conflict, until the user resolved them with [resolve].
    */
   fun sync(activity: Activity) = run(
-    "Syncing…",
+    SYNCING,
     remote = true,
     onSuccess = { found: List<Conflict> ->
       conflicts = found
@@ -145,7 +147,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   /** Re-encrypts entries whose recipients changed, then pushes. Without re-encrypting all of them, nothing is pushed. */
   private fun push(activity: Activity) = run(
-    "Pushing…",
+    PUSHING,
     remote = true,
     onSuccess = { skipped: List<String> ->
       notice = if (skipped.isEmpty()) "Synced"
@@ -182,6 +184,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     notice = "Deleted $name"
   }) { passage.delete(name) }
 }
+
+private const val SYNCING = "Syncing…"
+private const val PUSHING = "Pushing…"
 
 private const val LOCAL_NETWORK_HINT =
   "\n\nIf the server is on your local network, allow Passage to access \"Nearby devices\" in the app's permissions."

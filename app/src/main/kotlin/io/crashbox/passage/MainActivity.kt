@@ -63,6 +63,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -211,7 +212,7 @@ private fun Page(
   ) { padding -> content(Modifier.padding(padding)) }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
   val activity = LocalContext.current as ComponentActivity
@@ -230,46 +231,53 @@ private fun EntriesScreen(vm: MainViewModel, snackbar: SnackbarHostState) {
       FloatingActionButton(onClick = { vm.screen = Screen.Editor(null, "") }) { Icon(Icons.Default.Add, "Add") }
     },
   ) { modifier ->
-    Column(modifier.fillMaxSize()) {
-      if (vm.busy == null) {
-        val n = vm.conflicts.size
-        when {
-          n > 0 -> Banner(
-            "${if (n == 1) "1 entry conflicts" else "$n entries conflict"} with changes on the server. Tap to resolve.",
-            onClick = { vm.screen = Screen.Conflicts },
-          )
-          vm.pendingReencryption.isNotEmpty() -> Banner(
-            "${vm.pendingReencryption.size} entries must be re-encrypted for updated recipients before pushing. Sync to continue."
-          )
-          vm.unpushed -> Banner("Some changes are not pushed yet. Sync to push them.")
+    // pulling the list down syncs, like the button
+    PullToRefreshBox(
+      isRefreshing = vm.syncing,
+      onRefresh = { withLocalNetwork { vm.sync(activity) } },
+      modifier = modifier.fillMaxSize(),
+    ) {
+      Column(Modifier.fillMaxSize()) {
+        if (vm.busy == null) {
+          val n = vm.conflicts.size
+          when {
+            n > 0 -> Banner(
+              "${if (n == 1) "1 entry conflicts" else "$n entries conflict"} with changes on the server. Tap to resolve.",
+              onClick = { vm.screen = Screen.Conflicts },
+            )
+            vm.pendingReencryption.isNotEmpty() -> Banner(
+              "${vm.pendingReencryption.size} entries must be re-encrypted for updated recipients before pushing. Sync to continue."
+            )
+            vm.unpushed -> Banner("Some changes are not pushed yet. Sync to push them.")
+          }
         }
-      }
-      OutlinedTextField(
-        value = query,
-        onValueChange = { query = it },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
-        placeholder = { Text("Search") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-      )
-      LazyColumn {
-        for ((folder, names) in groupByFolder(shown)) {
-          if (folder.isNotEmpty()) {
-            stickyHeader(key = "folder:$folder") {
-              Text(
-                folder,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-                  .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+        OutlinedTextField(
+          value = query,
+          onValueChange = { query = it },
+          leadingIcon = { Icon(Icons.Default.Search, null) },
+          placeholder = { Text("Search") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        LazyColumn(Modifier.fillMaxSize()) {
+          for ((folder, names) in groupByFolder(shown)) {
+            if (folder.isNotEmpty()) {
+              stickyHeader(key = "folder:$folder") {
+                Text(
+                  folder,
+                  style = MaterialTheme.typography.titleSmall,
+                  color = MaterialTheme.colorScheme.primary,
+                  modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                )
+              }
+            }
+            items(names, key = { it }) { name ->
+              ListItem(
+                headlineContent = { Text(name.substringAfterLast('/')) },
+                modifier = Modifier.clickable { vm.screen = Screen.Entry(name) },
               )
             }
-          }
-          items(names, key = { it }) { name ->
-            ListItem(
-              headlineContent = { Text(name.substringAfterLast('/')) },
-              modifier = Modifier.clickable { vm.screen = Screen.Entry(name) },
-            )
           }
         }
       }
