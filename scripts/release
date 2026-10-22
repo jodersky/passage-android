@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+cd "$(dirname "$0")/.."
+export PASSAGE_SIGNING_KEY_COMMAND="passage infra/passage-android-signing-key"
+# --no-daemon lets the key command ask for a passphrase or PIN on the terminal
+# `show` prints the APK's path ref as JSON, e.g. "ref:v0:1a2b3c4d:/.../app.apk"
+apk=$(./mill --no-daemon show release.androidApk "$@" | sed -E 's/^"ref:[^:]*:[^:]*:(.*)"$/\1/')
+echo
+echo "Release APK: $apk"
+echo
+echo "Install it on a device connected over USB (with USB debugging enabled) with:"
+echo "  adb install -r $apk"
