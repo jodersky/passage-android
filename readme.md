@@ -7,6 +7,13 @@ A password manager for android, compatible with
 [pass](https://www.passwordstore.org/), but using
 [age](https://github.com/FiloSottile/age) encryption instead of gpg).
 
+<p>
+  <img src="screenshots/entries.png" alt="List of entries, grouped by folder" width="200">
+  <img src="screenshots/entry.png" alt="An entry, with its password, one-time password and notes" width="200">
+  <img src="screenshots/editor.png" alt="Editing an entry" width="200">
+  <img src="screenshots/settings.png" alt="Settings, with the phone's hardware-bound keys" width="200">
+</p>
+
 ## Motivation
 
 On my computer, I recently moved from [pass](https://www.passwordstore.org/) to
@@ -55,6 +62,9 @@ Requirements:
   [USB debugging](https://developer.android.com/studio/debug/dev-options#enable)
   enabled
 - [adb](https://developer.android.com/tools/adb), to install the app
+- The [Android SDK](https://developer.android.com/tools), with the
+  `platforms;android-37.0` and `build-tools;37.0.0` packages, and the
+  `ANDROID_HOME` environment variable set to its location
 
 Instructions:
 
