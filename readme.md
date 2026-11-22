@@ -52,6 +52,10 @@ needs:
   application will show the current TOTP. This is compatible with the
   [pass-otp](https://github.com/tadfisher/pass-otp) extension.
 
+## Installing
+
+You can find a pre-built APK in the [latest release](https://github.com/jodersky/passage-android/releases/latest/download/app.apk).
+
 ## Building
 
 Requirements:
