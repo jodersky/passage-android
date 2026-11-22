@@ -1,19 +1,18 @@
 //| mill-version: 1.3.1
-//| mill-jvm-version: zulu:21
+//| mill-jvm-version: 25
 package build
 
 import mill.*, androidlib.*, kotlinlib.*
 
-object androidSdkModule0 extends AndroidSdkModule {
+object androidSdkModule0 extends AndroidSdkModule:
   def buildToolsVersion = "37.0.0"
   // API 36.1+ is needed for BiometricPrompt.CryptoObject(KeyAgreement)
   def platformsVersion = "android-37.0"
-}
 
 // Platform-independent logic (age, crypto glue). Plain JVM module so that it
 // can be tested on the desktop; the app depends on it.
-object core extends KotlinModule {
-  def kotlinVersion = "2.0.21"
+object core extends KotlinModule:
+  def kotlinVersion = "2.4.21"
 
   def mvnDeps = Seq(
     mvn"com.exceptionfactory.jagged:jagged-api:1.0.0",
@@ -22,44 +21,43 @@ object core extends KotlinModule {
     mvn"com.exceptionfactory.jagged:jagged-x25519:1.0.0",
     mvn"com.exceptionfactory.jagged:jagged-ssh:1.0.0",
     mvn"com.hierynomus:sshj:0.41.2",
-    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r",
     // classes move between BouncyCastle jars across versions, so all of
     // them must have the same version (sshj brings older ones)
-    mvn"org.bouncycastle:bcprov-jdk18on:1.86",
-    mvn"org.bouncycastle:bcpkix-jdk18on:1.86",
-    mvn"org.bouncycastle:bcutil-jdk18on:1.86"
+    mvn"org.bouncycastle:bcprov-jdk18on:1.87",
+    mvn"org.bouncycastle:bcpkix-jdk18on:1.87",
+    mvn"org.bouncycastle:bcutil-jdk18on:1.87"
   )
 
-  object test extends KotlinTests, TestModule.Junit5 {
+  object test extends KotlinTests, TestModule.Junit5:
     def moduleDeps = super.moduleDeps ++ Seq(testserver)
     def mvnDeps = Seq(
-      mvn"org.jetbrains.kotlin:kotlin-test-junit5:2.0.21",
-      mvn"com.github.sbt.junit:jupiter-interface:0.11.2"
+      mvn"org.jetbrains.kotlin:kotlin-test-junit5:2.4.21",
+      mvn"com.github.sbt.junit:jupiter-interface:0.20.0"
     )
-  }
-}
 
 // Git over SSH server for testing, used by core's tests and runnable on the
 // desktop to test the app against:
 // `mill testserver.run <repos-dir> <authorized_keys> [port]`, then
 // `adb reverse tcp:2222 tcp:2222` so the phone can reach it.
-object testserver extends KotlinModule {
-  def kotlinVersion = "2.0.21"
+object testserver extends KotlinModule:
+  def kotlinVersion = "2.4.21"
 
   def mvnDeps = Seq(
-    mvn"org.apache.sshd:sshd-core:2.20.0",
-    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.0.202609011348-r",
+    mvn"org.apache.sshd:sshd-core:2.20.1",
+    mvn"org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r",
     mvn"org.slf4j:slf4j-simple:2.0.20"
   )
-}
 
 /** The app; built in two variants, [[app]] and [[release]], from the same sources (in `app/`). */
-trait PassageApp extends AndroidAppKotlinModule {
-  def kotlinVersion = "2.0.21"
+trait PassageApp extends AndroidAppKotlinModule:
+  def kotlinVersion = "2.4.21"
   def androidSdkModule = mill.api.ModuleRef(androidSdkModule0)
   def androidCompileSdk = 37
   def androidMinSdk = 37
   def androidEnableCompose = true
+  // kotlinc defaults to 1.8, but AndroidX inline functions are built for 11+
+  override def kotlincOptions = Task(super.kotlincOptions() ++ Seq("-jvm-target", "25"))
 
   def androidApplicationNamespace = "io.crashbox.passage"
 
@@ -67,15 +65,14 @@ trait PassageApp extends AndroidAppKotlinModule {
   def appLabel: String
 
   // the label differs between variants, so it comes from a generated resource
-  def appLabelResources = Task {
+  def appLabelResources = Task:
     os.write(
       Task.dest / "values" / "app_label.xml",
       s"""<resources><string name="app_label">${appLabel}</string></resources>\n""",
       createFolders = true,
     )
     PathRef(Task.dest)
-  }
-  override def androidResources = Task { super.androidResources() :+ appLabelResources() }
+  override def androidResources = Task(super.androidResources() :+ appLabelResources())
 
   /**
    * From the last `v<major>.<minor>.<patch>` git tag: `0.1.0` on the tag,
@@ -83,78 +80,82 @@ trait PassageApp extends AndroidAppKotlinModule {
    * changes. The version code (which must increase with every release)
    * is major * 1000000 + minor * 1000 + patch.
    */
-  def gitVersion = Task.Input {
+  def gitVersion = Task.Input:
     val described = os.proc("git", "describe", "--tags", "--match", "v[0-9]*", "--dirty")
       .call(cwd = mill.api.BuildCtx.workspaceRoot, check = false, stderr = os.Pipe)
-    if (described.exitCode == 0) described.out.trim().stripPrefix("v") else "0.0.0-dev"
-  }
-  def androidVersionName = Task { gitVersion() }
-  def androidVersionCode = Task {
-    val Array(major, minor, patch) = gitVersion().takeWhile(c => c.isDigit || c == '.').split('.').map(_.toInt)
+    if described.exitCode == 0 then described.out.trim().stripPrefix("v") else "0.0.0-dev"
+  def androidVersionName = Task(gitVersion())
+  def androidVersionCode = Task:
+    val Array(major, minor, patch) = gitVersion().takeWhile(c => c.isDigit || c == '.').split('.').map(_.toInt): @unchecked
     math.max(1, major * 1000000 + minor * 1000 + patch)
-  }
 
   def moduleDeps = Seq(core)
 
   // mill only packages the classes and META-INF of dependency jars, but
   // some need their other resources at runtime (e.g. jgit's message
   // bundles), like the Android Gradle plugin does
-  def androidPackageableExtraFiles = Task {
+  def androidPackageableExtraFiles = Task:
     val seen = collection.mutable.Set.empty[os.RelPath]
     androidPackagedDeps()
       .filter(ref => ref.path.ext == "jar" && ref != androidSdkModule().androidJarPath())
       .zipWithIndex
-      .flatMap { case (ref, i) =>
-        val zip = new java.util.zip.ZipFile(ref.path.toIO)
-        try {
+      .flatMap: (ref, i) =>
+        val zip = java.util.zip.ZipFile(ref.path.toIO)
+        try
           import scala.jdk.CollectionConverters.*
           zip.entries().asScala.toSeq.map(e => e: java.util.zip.ZipEntry)
             .filter(e => !e.isDirectory && !e.getName.endsWith(".class") && !e.getName.startsWith("META-INF/"))
             .map(e => os.RelPath(e.getName) -> e)
-            .filter { case (rel, _) => seen.add(rel) } // first jar wins
-            .map { case (rel, e) =>
+            .filter((rel, _) => seen.add(rel)) // first jar wins
+            .map: (rel, e) =>
               val dest = Task.dest / i.toString / rel
               os.write(dest, zip.getInputStream(e), createFolders = true)
               mill.androidlib.AndroidPackageableExtraFile(PathRef(dest), rel)
-            }
-        } finally zip.close()
-      }
-  }
+        finally zip.close()
 
   def mvnDeps: T[Seq[Dep]] = Seq(
-    mvn"androidx.core:core-ktx:1.15.0",
-    mvn"androidx.activity:activity-compose:1.10.0",
-    mvn"androidx.compose.material3:material3:1.3.1",
-    mvn"androidx.compose.ui:ui:1.7.6",
-    mvn"androidx.lifecycle:lifecycle-runtime-compose:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7",
+    mvn"androidx.core:core-ktx:1.19.1",
+    mvn"androidx.activity:activity-compose:1.13.0",
+    // Compose 1.12+ (and material3 1.5+, which needs it) can't be used yet:
+    // coursier fails to parse their Gradle metadata (boolean attribute values)
+    mvn"androidx.compose.material3:material3:1.4.0",
+    // no longer brought by material3; 1.7.8 is its final version
+    mvn"androidx.compose.material:material-icons-core:1.7.8",
+    mvn"androidx.compose.ui:ui:1.11.4",
+    mvn"androidx.lifecycle:lifecycle-runtime-compose:2.11.1",
+    mvn"androidx.lifecycle:lifecycle-viewmodel-compose:2.11.1",
     // QR code scanning (one-time passwords)
-    mvn"androidx.camera:camera-camera2:1.6.2",
-    mvn"androidx.camera:camera-lifecycle:1.6.2",
-    mvn"androidx.camera:camera-view:1.6.2",
+    mvn"androidx.camera:camera-camera2:1.7.0",
+    mvn"androidx.camera:camera-lifecycle:1.7.0",
+    mvn"androidx.camera:camera-view:1.7.0",
     mvn"com.google.zxing:core:3.5.4",
     // coursier ignores Gradle module metadata version constraints, so these
     // transitive artifacts must be pinned to avoid duplicate classes in d8
-    mvn"androidx.collection:collection-jvm:1.4.4",
-    mvn"androidx.collection:collection-ktx:1.4.4",
-    mvn"androidx.lifecycle:lifecycle-common:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-process:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-livedata:2.8.7",
-    mvn"androidx.lifecycle:lifecycle-livedata-core:2.8.7",
+    mvn"androidx.collection:collection-jvm:1.7.0",
+    mvn"androidx.collection:collection-ktx:1.7.0",
+    mvn"androidx.lifecycle:lifecycle-common:2.11.1",
+    mvn"androidx.lifecycle:lifecycle-process:2.11.1",
+    mvn"androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.1",
+    mvn"androidx.lifecycle:lifecycle-livedata:2.11.1",
+    mvn"androidx.lifecycle:lifecycle-livedata-core:2.11.1",
     mvn"androidx.arch.core:core-common:2.2.0",
     mvn"androidx.arch.core:core-runtime:2.2.0",
+    // all of Compose must have the same version (material3 brings older ones)
+    mvn"androidx.compose.foundation:foundation:1.11.4",
+    mvn"androidx.compose.animation:animation:1.11.4",
+    mvn"androidx.compose.material:material-ripple:1.11.4",
+    mvn"androidx.savedstate:savedstate-compose:1.4.0",
+    // activity-ktx was merged into activity in 1.13.0 (CameraX brings an older one)
+    mvn"androidx.activity:activity-ktx:1.13.0",
     // tracing-ktx was merged into tracing in 1.3.0 (brought by CameraX)
     mvn"androidx.tracing:tracing-ktx:1.3.0"
   )
-}
 
 /** For development: debuggable, signed with mill's debug key, installable next to the release. */
-object app extends PassageApp {
+object app extends PassageApp:
   def androidIsDebug = true
   def androidApplicationId = "io.crashbox.passage.debug"
   def appLabel = "Passage (debug)"
-}
 
 /**
  * The release: not debuggable, and signed with the release key, which is
@@ -162,7 +163,7 @@ object app extends PassageApp {
  * PKCS#8 private key, PEM or DER), so that it is never written to disk. Its
  * certificate is `signing/release-cert.pem`. See `signing/README.md`.
  */
-object release extends PassageApp {
+object release extends PassageApp:
   override def moduleDir = app.moduleDir
   def androidIsDebug = false
   def androidApplicationId = "io.crashbox.passage"
@@ -170,7 +171,7 @@ object release extends PassageApp {
 
   def signingCertificate = Task.Source(mill.api.BuildCtx.workspaceRoot / "signing" / "release-cert.pem")
 
-  override def androidApk = Task {
+  override def androidApk = Task:
     val command = Task.env.getOrElse(
       "PASSAGE_SIGNING_KEY_COMMAND",
       throw new Exception("PASSAGE_SIGNING_KEY_COMMAND must be a command printing the release signing key, see signing/README.md")
@@ -179,7 +180,7 @@ object release extends PassageApp {
     val key = pkcs8Der(output)
     java.util.Arrays.fill(output, 0.toByte)
     val signed = Task.dest / "app.apk"
-    try {
+    try
       // the key is passed on standard input, not as a file
       os.proc(
         androidSdkModule().apksignerExe().path,
@@ -189,20 +190,16 @@ object release extends PassageApp {
         "--key", "/dev/stdin",
         "--cert", signingCertificate().path,
       ).call(stdin = key, stderr = os.Pipe)
-    } finally java.util.Arrays.fill(key, 0.toByte)
+    finally java.util.Arrays.fill(key, 0.toByte)
     PathRef(signed)
-  }
 
   /** An unencrypted PKCS#8 private key, as DER, from PEM or DER input. */
-  private def pkcs8Der(bytes: Array[Byte]): Array[Byte] = {
-    val text = new String(bytes, java.nio.charset.StandardCharsets.US_ASCII)
-    if (!text.startsWith("-----BEGIN")) bytes
-    else {
+  private def pkcs8Der(bytes: Array[Byte]): Array[Byte] =
+    val text = String(bytes, java.nio.charset.StandardCharsets.US_ASCII)
+    if !text.startsWith("-----BEGIN") then bytes
+    else
       val pem = """(?s)-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----""".r
       val body = pem.findFirstMatchIn(text).getOrElse(
         throw new Exception("the signing key must be an unencrypted PKCS#8 key (-----BEGIN PRIVATE KEY-----)")
       ).group(1)
       java.util.Base64.getMimeDecoder.decode(body)
-    }
-  }
-}
